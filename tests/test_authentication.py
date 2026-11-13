@@ -16,7 +16,7 @@ from scaleinn.core.exceptions import (
 )
 
 LOGIN_PATH = "/api/v1/orca/user/login"
-PROJECTS_ENDPOINT = {"projects": "/projects"}  # the projects API contract is still pending
+PROJECTS_PATH = "/api/v1/orca/projects/list"
 PROJECT_LIST = [
     {"projectId": "exch4bt42y", "projectName": "Production", "status": "Active"},
     {"projectId": "dev00000aa", "projectName": "Development", "status": "Active"},
@@ -97,7 +97,6 @@ def run_configure(args, user_input):
 
 
 def test_configure_root_user_end_to_end(http):
-    cfg.update_config(endpoints=PROJECTS_ENDPOINT)
     http.add(200, {"access_token": "TOKEN-R", "refresh_token": "REF-R", "expires_in": 3600})
     http.add(200, PROJECT_LIST)
 
@@ -119,12 +118,13 @@ def test_configure_root_user_end_to_end(http):
     for path in (cfg.config_path(), cfg.credentials_path(), cfg.log_path()):
         assert "s3cret-pass" not in path.read_text()
     assert "TOKEN-R" not in cfg.log_path().read_text()
-    # second request (projects) used the new bearer token
+    # second request is the accessible-projects API, sent with the new bearer token
+    assert http.calls[1]["url"] == "https://app.scaleinn.in:8443" + PROJECTS_PATH
+    assert http.calls[1]["params"] == {"search": "", "size": 100, "sortDir": "DESC"}
     assert http.calls[1]["headers"]["Authorization"] == "Bearer TOKEN-R"
 
 
 def test_configure_iam_user_selects_second_project(http):
-    cfg.update_config(endpoints=PROJECTS_ENDPOINT)
     http.add(200, {"access_token": "TOKEN-I"}).add(200, PROJECT_LIST)
 
     result = run_configure([], "2\nme@example.com\npw-iam\n2\n")
@@ -135,12 +135,14 @@ def test_configure_iam_user_selects_second_project(http):
     assert (config["auth_type"], config["project_id"]) == ("iam", "dev00000aa")
 
 
-def test_configure_password_login_then_manual_project_while_projects_api_is_pending(http):
-    """The login API is integrated; the projects API is not, so the project is typed in."""
+def test_configure_falls_back_to_manual_project_when_projects_response_is_not_understood(http):
+    """The projects response schema is unconfirmed: an unrecognized body means manual entry."""
     http.add(200, {"accessToken": "TOK-1", "refreshToken": "REF-1"})
+    http.add(200, {"unexpected": "shape"})
     result = run_configure([], "1\nroot-test-user\npw-xyz\nexch4bt42y\nProduction\n")
     assert result.exit_code == 0, result.output
-    assert len(http.calls) == 1 and http.calls[0]["url"].endswith(LOGIN_PATH)
+    assert len(http.calls) == 2 and http.calls[0]["url"].endswith(LOGIN_PATH)
+    assert http.calls[1]["url"].endswith(PROJECTS_PATH)
     assert "Authentication successful!" in result.output
     assert "Enter the project details manually" in result.output
     assert json.loads(cfg.credentials_path().read_text())["access_token"] == "TOK-1"
@@ -158,6 +160,13 @@ def test_configure_wrong_password_stores_nothing(http):
     assert not cfg.config_path().exists() or json.loads(cfg.config_path().read_text())["project_id"] is None
 
 
+def test_configure_projects_api_http_errors_are_not_swallowed(http):
+    http.add(200, {"access_token": "T"}).add(403, {"message": "no access"})
+    result = run_configure([], "1\nroot-test-user\npw\n")
+    assert result.exit_code == 4  # shown as an error, not turned into manual entry
+    assert "Enter the project details manually" not in result.output
+
+
 def test_configure_login_response_without_token_is_an_error(http):
     http.add(200, {"message": "ok but no token"})
     result = run_configure([], "1\nroot-test-user\npw\n")
@@ -165,18 +174,19 @@ def test_configure_login_response_without_token_is_an_error(http):
     assert not cfg.credentials_path().exists()
 
 
-def test_configure_with_token_and_manual_project_when_projects_api_unknown(http):
-    result = run_configure(["--with-token"], "1\nBEARER-TOK-123\nmyproj01\nMy Project\n")
+def test_configure_with_token_skips_login_and_lists_projects(http):
+    http.add(200, {"data": {"content": PROJECT_LIST}})  # projects inside a data envelope
+    result = run_configure(["--with-token"], "1\nBEARER-TOK-123\n2\n")
     assert result.exit_code == 0, result.output
     assert json.loads(cfg.credentials_path().read_text())["access_token"] == "BEARER-TOK-123"
     config = json.loads(cfg.config_path().read_text())
-    assert (config["project_id"], config["project_name"]) == ("myproj01", "My Project")
+    assert (config["project_id"], config["project_name"]) == ("dev00000aa", "Development")
     assert "BEARER-TOK-123" not in result.output
-    assert http.calls == []
+    assert len(http.calls) == 1 and http.calls[0]["url"].endswith(PROJECTS_PATH)
+    assert http.calls[0]["headers"]["Authorization"] == "Bearer BEARER-TOK-123"
 
 
 def test_configure_project_only_keeps_login_and_changes_project(http, logged_in):
-    cfg.update_config(endpoints={"projects": "/projects"})
     http.add(200, PROJECT_LIST)
     result = run_configure(["--project-only"], "2\n")
     assert result.exit_code == 0, result.output
@@ -190,18 +200,37 @@ def test_configure_project_only_requires_login():
     assert result.exit_code == 3
 
 
-def test_configure_saves_connection_options_without_touching_project(http, logged_in):
-    cfg.update_config(endpoints={"projects": "/projects"})
+def test_configure_saves_url_overrides_without_touching_project(http, logged_in):
     http.add(200, PROJECT_LIST)
-    result = run_configure(["--project-only", "--api-url", "http://10.1.1.1:8080"], "1\n")
+    result = run_configure(
+        ["--project-only", "--api-url", "http://10.1.1.1:8080/", "--object-storage-url", "http://10.1.1.1:9000"],
+        "1\n",
+    )
     assert result.exit_code == 0
     assert result.output.count("plain HTTP") == 1  # security warning shown once, not repeated
     config = json.loads(cfg.config_path().read_text())
-    assert config["api_url"] == "http://10.1.1.1:8080" and config["protocol"] == "http"
+    assert config["api_url"] == "http://10.1.1.1:8080"  # trailing slash removed
+    assert config["object_storage_url"] == "http://10.1.1.1:9000"
+    assert http.calls[0]["url"].startswith("http://10.1.1.1:8080/")
+
+
+def test_configure_protocol_switches_environment_and_resets_overrides(http, logged_in):
+    cfg.update_config(api_url="https://pinned.example:1111", object_storage_url="https://pinned.example:2222")
+    http.add(200, PROJECT_LIST)
+    result = run_configure(["--project-only", "--protocol", "http"], "1\n")
+    assert result.exit_code == 0, result.output
+    config = json.loads(cfg.config_path().read_text())
+    assert config["protocol"] == "http"
+    assert config["api_url"] is None and config["object_storage_url"] is None  # back to env defaults
+    assert http.calls[0]["url"].startswith("http://")
+    assert "pinned.example" not in http.calls[0]["url"]
+
+
+def test_configure_rejects_invalid_url_option():
+    assert run_configure(["--project-only", "--api-url", "not-a-url"], "").exit_code == 6
 
 
 def test_configure_no_projects_available(http):
-    cfg.update_config(endpoints=PROJECTS_ENDPOINT)
     http.add(200, {"access_token": "T"}).add(200, [])
     assert run_configure([], "1\nroot\npw\n").exit_code == 2
 

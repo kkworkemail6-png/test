@@ -7,7 +7,7 @@ from scaleinn.core import config as cfg
 from scaleinn.core import project_manager as pm
 from scaleinn.core.exceptions import (
     APIError,
-    EndpointNotConfiguredError,
+    ResponseFormatError,
     ProjectNotSelectedError,
 )
 
@@ -70,15 +70,23 @@ def test_get_selected_project_id():
     assert pm.get_selected_project_id(cfg.load_config()) == "abc"
 
 
-def test_fetch_projects_requires_configured_endpoint(make_client):
-    client = make_client()
-    with pytest.raises(EndpointNotConfiguredError):
-        pm.fetch_projects(client, cfg.load_config())
-
-
-def test_fetch_projects_uses_configured_endpoint(http, make_client, logged_in):
-    client = make_client(endpoints={"projects": "/api/v1/projects"})
+def test_fetch_projects_calls_documented_endpoint_with_bearer_token(http, make_client, logged_in):
     http.add(200, [{"projectId": "p9", "projectName": "Nine"}])
-    projects = pm.fetch_projects(client, cfg.load_config())
+    projects = pm.fetch_projects(make_client())
     assert projects == [pm.Project("p9", "Nine", None)]
-    assert http.calls[0]["url"].endswith("/api/v1/projects")
+    call = http.calls[0]
+    assert call["method"] == "GET"
+    assert call["url"] == "https://app.scaleinn.in:8443/api/v1/orca/projects/list"
+    assert call["params"] == {"search": "", "size": 100, "sortDir": "DESC"}
+    assert call["headers"]["Authorization"].startswith("Bearer ")
+
+
+def test_fetch_projects_unrecognized_shape_is_a_response_format_error(http, make_client, logged_in):
+    http.add(200, {"message": "something else"})
+    with pytest.raises(ResponseFormatError):
+        pm.fetch_projects(make_client())
+
+
+def test_parse_projects_looks_through_envelopes():
+    body = {"data": {"content": [{"id": 7, "name": "Seven"}], "total": 1}}
+    assert pm.parse_projects(body) == [pm.Project("7", "Seven", None)]

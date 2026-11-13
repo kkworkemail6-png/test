@@ -77,6 +77,10 @@ class APIError(ScaleinnError):
         self.status_code = status_code
 
 
+class ResponseFormatError(APIError):
+    """The backend answered successfully, but the body is not in a recognized shape."""
+
+
 class ValidationError(ScaleinnError):
     """Invalid user input detected locally."""
 

@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import click
 
-from scaleinn.core import authentication, config as cfg, project_manager
-from scaleinn.core.exceptions import (
-    AuthenticationError,
-    EndpointNotConfiguredError,
-    ValidationError,
-)
+from scaleinn.core import authentication, config as cfg, env, project_manager
+from scaleinn.core.exceptions import AuthenticationError, ResponseFormatError, ValidationError
 from scaleinn.core.logger import get_logger
 from scaleinn.core.session import Session, pass_session
 from scaleinn.utils import terminal
@@ -17,11 +13,18 @@ from scaleinn.utils import terminal
 log = get_logger("configure")
 
 
-def _apply_connection_options(session: Session, api_url, verify_ssl, ca_bundle) -> None:
+def _apply_connection_options(
+    session: Session, protocol, api_url, object_storage_url, verify_ssl, ca_bundle
+) -> None:
     """Persist only the connection settings the user explicitly passed."""
-    changes = {}
+    changes: dict = {}
+    if protocol is not None:
+        # Choosing an environment resets URL overrides to that environment's defaults.
+        changes.update(protocol=protocol, api_url=None, object_storage_url=None)
     if api_url is not None:
         changes["api_url"] = cfg.validate_api_url(api_url)
+    if object_storage_url is not None:
+        changes["object_storage_url"] = cfg.validate_api_url(object_storage_url)
     if verify_ssl is not None:
         changes["verify_ssl"] = verify_ssl
     if ca_bundle is not None:
@@ -33,7 +36,14 @@ def _apply_connection_options(session: Session, api_url, verify_ssl, ca_bundle) 
 
 
 @click.command("configure", help="Sign in to Scaleinn and select the active project.")
-@click.option("--api-url", help="Backend URL, e.g. https://app.scaleinn.in:8443 (http:// is also supported).")
+@click.option(
+    "--protocol",
+    type=click.Choice(list(env.ENVIRONMENTS)),
+    help="Use the https or http environment (default URLs come from core/env.py). "
+    "Resets any URL overrides.",
+)
+@click.option("--api-url", help="Override the main backend URL (login, CT, ...), e.g. https://app.scaleinn.in:8443.")
+@click.option("--object-storage-url", help="Override the Object Storage URL, e.g. https://app.scaleinn.in:8086.")
 @click.option("--verify-ssl/--no-verify-ssl", default=None, help="Enable/disable TLS certificate verification.")
 @click.option(
     "--ca-bundle",
@@ -44,12 +54,21 @@ def _apply_connection_options(session: Session, api_url, verify_ssl, ca_bundle) 
 @click.option(
     "--with-token",
     is_flag=True,
-    help="Interim: supply an existing bearer token instead of logging in with a password.",
+    help="Supply an existing bearer token instead of logging in with a password.",
 )
 @pass_session
-def configure(session: Session, api_url, verify_ssl, ca_bundle, project_only: bool, with_token: bool) -> None:
+def configure(
+    session: Session,
+    protocol,
+    api_url,
+    object_storage_url,
+    verify_ssl,
+    ca_bundle,
+    project_only: bool,
+    with_token: bool,
+) -> None:
     terminal.info("Welcome to Scaleinn CLI\n")
-    _apply_connection_options(session, api_url, verify_ssl, ca_bundle)
+    _apply_connection_options(session, protocol, api_url, object_storage_url, verify_ssl, ca_bundle)
     for message in cfg.connection_warnings(session.config):
         terminal.warn_once(message)  # shown before any password is typed; not repeated later
 
@@ -74,10 +93,9 @@ def configure(session: Session, api_url, verify_ssl, ca_bundle, project_only: bo
 
     terminal.info("\nFetching accessible projects...\n")
     try:
-        projects = project_manager.fetch_projects(session.client, session.config)
-    except EndpointNotConfiguredError as exc:
-        terminal.warn(exc.message)
-        terminal.info("Enter the project details manually.\n")
+        projects = project_manager.fetch_projects(session.client)
+    except ResponseFormatError as exc:
+        terminal.warn(f"{exc.message} Enter the project details manually.")
         project = project_manager.prompt_project_manually()
     else:
         if not projects:

@@ -26,4 +26,5 @@ def list_buckets(session: Session, search: str | None = None) -> Any:
         "search": normalize_search(search),
     }
     log.info("Calling get-all-bucket API")
-    return session.client.get(BUCKET_LIST_PATH, params=params)
+    # Object Storage is served from its own URL (objectStorageUrl in core/env.py).
+    return session.client.get(BUCKET_LIST_PATH, params=params, service="object_storage")

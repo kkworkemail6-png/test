@@ -33,7 +33,7 @@ scaleinn ct list [--search TEXT] [--page N] [--size N] [--sort-by FIELD] [--sort
 19. [APT installation and uninstallation](#19-apt-installation-and-uninstallation)
 20. [Adding a new resource module](#20-adding-a-new-resource-module)
 21. [Command execution flow](#21-command-execution-flow)
-22. [Pending API contracts](#22-pending-api-contracts)
+22. [API contracts](#22-api-contracts)
 
 ---
 
@@ -48,8 +48,8 @@ Implemented now:
 
 | Area | Status |
 |------|--------|
-| `configure` (root / IAM login, project selection) | Login is integrated with the real `POST /api/v1/orca/user/login` API. The accessible-projects API and token refresh are **placeholders** until their contracts arrive (see [section 22](#22-pending-api-contracts)); until then the project ID is typed in. |
-| `object-storage list-buckets` | Done, against the real `get-all-bucket` API. |
+| `configure` (root / IAM login, project selection) | Login is integrated with the real `POST /api/v1/orca/user/login` API. The accessible-projects API is integrated too; its response schema is unconfirmed, so if the response is not recognized the project ID is typed in. Token refresh is a **placeholder** (see [section 22](#22-api-contracts)). |
+| `object-storage list-buckets` | Done, against the real `get-all-bucket` API (served from its own URL, port 8086). |
 | `ct list` | Done, against the real `GET /api/v1/orca/compute/lxc/get-list-by-projectid` API (search, paging and sorting supported). |
 
 ## 2. Architecture
@@ -143,6 +143,7 @@ scaleinn-cli/
 |   |-- version.py                  __version__ (single source of truth)
 |   |
 |   |-- core/
+|   |   |-- env.py                  backend URLs per protocol (https / http) + optional env values
 |   |   |-- config.py               ~/.scaleinn/config.json load/update (atomic, 700/600)
 |   |   |-- credentials.py          ~/.scaleinn/credentials.json (tokens only, 600)
 |   |   |-- token_manager.py        token storage, expiry tracking, refresh
@@ -154,7 +155,8 @@ scaleinn-cli/
 |   |   |-- logger.py               logging setup + secret redaction
 |   |   |-- output.py               --output option and table/JSON rendering
 |   |
-|   |-- auth/                       backend login / refresh contracts
+|   |-- auth/                       account-level backend APIs
+|   |   |-- operations.py           projects, organisations and my-policies APIs (one file)
 |   |   |-- root_auth.py            root endpoint key + payload
 |   |   |-- iam_auth.py             IAM endpoint key + payload
 |   |   |-- login.py                dispatcher + login-response parsing
@@ -190,7 +192,9 @@ scaleinn-cli/
 | `services/*/operations.py` | **One file per service holding every API operation.** Add new operations here, not in new files. |
 | `services/*/commands.py` | Click group + commands for the service; thin wrappers over `operations.py`. |
 | `services/*/models.py` | Service-specific validation / data structures. |
-| `auth/*.py` | The only files that contain login/refresh payload details. |
+| `core/env.py` | Backend base URLs (`apiUrl`, `objectStorageUrl`), one block for https and one for http, plus `backupOptionValue`. |
+| `auth/operations.py` | The projects, organisations and my-policies APIs. |
+| `auth/*_auth.py`, `login.py`, `refresh.py` | The only files that contain login/refresh payload details. |
 
 ## 6. Installation from source
 
@@ -255,8 +259,9 @@ Options of `scaleinn configure`:
 
 ```json
 {
-    "api_url": "https://app.scaleinn.in:8443",
     "protocol": "https",
+    "api_url": null,
+    "object_storage_url": null,
     "auth_type": "root",
     "project_id": "exch4bt42y",
     "project_name": "Production",
@@ -265,8 +270,12 @@ Options of `scaleinn configure`:
 }
 ```
 
+`protocol` (`https` or `http`) selects which block of `core/env.py` supplies the backend URLs.
+`api_url` and `object_storage_url` are optional overrides; `null` means "use the environment value",
+so editing `env.py` takes effect without touching any config file.
+
 Optional keys: `ca_bundle` (path), `timeout` (read timeout in seconds, default 30) and `endpoints`
-(see [section 22](#22-pending-api-contracts)). `protocol` is always derived from `api_url`.
+(login-path overrides and the future refresh path; see [section 22](#22-api-contracts)).
 
 ## 8. Root authentication
 
@@ -300,8 +309,10 @@ Project selection is centralized in `core/project_manager.py`:
 * Services never read the stored value themselves; they use `session.project_id`.
 * The stored project ID is a convenience, **not an authorization**. The backend validates access on
   every request, and a 403 is reported as an access-denied error.
-* If the projects endpoint has not been configured yet, `configure` asks for the project ID/name
-  manually.
+* The list comes from `GET /api/v1/orca/projects/list?search=&size=100&sortDir=DESC` (see
+  `auth/operations.py`). Its response schema is unconfirmed: the CLI accepts a list of records, also
+  inside a `data` / `content` envelope. If the response is not recognized, `configure` says so and asks
+  for the project ID/name manually (HTTP errors such as 401/403 are still reported as errors).
 
 ## 11. Token storage and management
 
@@ -364,18 +375,35 @@ envelope such as `{"data": {"content": [...]}}`), falling back to JSON otherwise
 
 ## 14. HTTP / HTTPS configuration
 
+Backend URLs live in `src/scaleinn/core/env.py`, in two separate blocks, like an `environment.ts`:
+
+| Key | `https` block | `http` block |
+|-----|---------------|--------------|
+| `apiUrl` (login, projects, organisations, policies, CT and every other module) | `https://app.scaleinn.in:8443` | `http://192.168.192.234:8080` * |
+| `objectStorageUrl` (Object Storage only) | `https://app.scaleinn.in:8086` | `http://192.168.192.234:8080` * |
+| `backupOptionValue` (optional, for later APIs) | `backup-store` | `backup-store` |
+
+\* placeholder: the real HTTP host/ports were not supplied; edit `env.py`.
+
 ```bash
-scaleinn configure --api-url https://app.scaleinn.in:8443
-scaleinn configure --api-url http://192.168.192.234:8080 --project-only
+scaleinn configure --protocol https                  # default: use the https block
+scaleinn configure --protocol http --project-only    # use the http block (resets URL overrides)
+scaleinn configure --api-url https://other.example:8443 --project-only         # override one URL
+scaleinn configure --object-storage-url https://other.example:8086 --project-only
 scaleinn configure --ca-bundle /etc/ssl/my-company-ca.pem --project-only
 scaleinn configure --no-verify-ssl --project-only     # development/testing only
 ```
 
-* The scheme of `api_url` decides HTTP vs HTTPS; nothing is hard-coded.
-* With **HTTP**, a warning is printed (to stderr, on every command) because bearer tokens are sent
-  without TLS. Use HTTPS in production.
+* `protocol` in `config.json` picks the block; `api_url` / `object_storage_url` override single URLs.
+* Operations choose their service through the API client: `client.get(path)` uses `apiUrl`, and
+  `client.get(path, service="object_storage")` uses `objectStorageUrl`.
+* With **HTTP** (any service URL), a warning is printed (to stderr, once per command) because bearer
+  tokens are sent without TLS. Use HTTPS in production.
 * With `--no-verify-ssl`, a warning is printed as well.
 * TLS failures produce a hint about `--ca-bundle`.
+
+To add a service with its own URL: add its key to both blocks of `env.py` and one line to `SERVICES`
+in `core/config.py`, then pass `service="<name>"` from its `operations.py`.
 
 ## 15. Logging and debugging
 
@@ -492,30 +520,39 @@ and do not use `requests` outside `core/api_client.py`.
 8. On success, the parsed JSON goes to `render(...)`, which prints JSON or a table.
 9. Any `ScaleinnError` is caught in `cli.py`, shown with its hint and converted to its exit code.
 
-## 22. Pending API contracts
+## 22. API contracts
 
-Integrated: `POST /api/v1/orca/user/login`, `GET /api/v1/orca/compute/lxc/get-list-by-projectid` and
-`GET /api/v1/object-storage/bucket/get-all-bucket`.
+Integrated (all on `apiUrl` unless noted):
+
+| API | Where |
+|-----|-------|
+| `POST /api/v1/orca/user/login` | `auth/login.py`, `auth/root_auth.py`, `auth/iam_auth.py` |
+| `GET /api/v1/orca/projects/list?search=&size=100&sortDir=DESC` | `auth/operations.py` (`list_projects`), used by `configure` |
+| `GET /api/v1/orca/organisation/list?size=100&search=` | `auth/operations.py` (`list_organizations`) |
+| `GET /api/v1/orca/policies/my-policies?projectId=` | `auth/operations.py` (`get_my_policies`) |
+| `GET /api/v1/orca/compute/lxc/get-list-by-projectid?...` | `services/ct/operations.py` |
+| `GET /api/v1/object-storage/bucket/get-all-bucket?...` (on `objectStorageUrl`) | `services/object_storage/operations.py` |
+
+The organisation and policies APIs have no CLI command yet; they are available as functions.
 
 Still **not invented**; each is isolated in one place:
 
 | Item | Where | How to provide it |
 |------|-------|-------------------|
-| Accessible-projects API + response | `core/project_manager.py` | Set `endpoints.projects` in `config.json` and adjust the field names in `normalize_project`. Until then `configure` asks for the project ID/name. |
 | Token refresh | `auth/refresh.py` | Set `endpoints.refresh` (and confirm the payload). Without it, expired sessions require `scaleinn configure`. |
-| Login response format | `auth/login.py` (`parse_token_response`) | Currently tolerant of common key names; adjust if the real response differs. |
+| Login / projects response formats | `auth/login.py` (`parse_token_response`), `core/project_manager.py` (`normalize_project`) | Currently tolerant of common key names; adjust if the real responses differ. |
 | Root vs IAM discriminator, if any | `auth/root_auth.py`, `auth/iam_auth.py` | Both use the shared login API today. |
+| HTTP environment URLs | `core/env.py` | Replace the placeholder `HTTP` block. |
 | CT / bucket list response schemas | `services/*/commands.py` | Pass explicit columns to `render`. |
 
-Optional overrides in `config.json` (all have working defaults or are optional):
+Optional path overrides in `config.json`:
 
 ```json
 {
     "endpoints": {
         "root_login": "/api/v1/orca/user/login",
         "iam_login": "/api/v1/orca/user/login",
-        "refresh": "/api/v1/...",
-        "projects": "/api/v1/..."
+        "refresh": "/api/v1/..."
     }
 }
 ```

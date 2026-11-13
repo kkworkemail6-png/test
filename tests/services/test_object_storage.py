@@ -11,7 +11,7 @@ from conftest import TEST_PROJECT, TEST_TOKEN, split_runner
 
 runner = CliRunner()
 split = split_runner()  # separate stdout/stderr, for tests that parse stdout
-URL = "https://app.scaleinn.in:8443/api/v1/object-storage/bucket/get-all-bucket"
+URL = "https://app.scaleinn.in:8086/api/v1/object-storage/bucket/get-all-bucket"
 
 
 def test_list_buckets_calls_documented_endpoint_with_selected_project(http, logged_in):

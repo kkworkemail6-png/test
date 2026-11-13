@@ -12,28 +12,20 @@ from typing import Any
 
 import click
 
+from scaleinn.auth import operations as auth_operations
 from scaleinn.core import config as cfg
 from scaleinn.core.api_client import ApiClient
-from scaleinn.core.exceptions import (
-    APIError,
-    EndpointNotConfiguredError,
-    ProjectNotSelectedError,
-)
+from scaleinn.core.exceptions import ProjectNotSelectedError, ResponseFormatError
 from scaleinn.core.logger import get_logger
-from scaleinn.utils.table_formatter import format_grid
+from scaleinn.utils.table_formatter import extract_rows, format_grid
 
 log = get_logger("project")
 
-# ---------------------------------------------------------------------------
-# PLACEHOLDER: the "accessible projects" API contract has not been supplied.
-# The endpoint comes from config.json -> endpoints.projects, and the field
-# names below are a defensive guess to be replaced by the real schema.
-# ---------------------------------------------------------------------------
-PROJECTS_ENDPOINT_KEY = "projects"
+# The projects API response schema has not been confirmed: these are tolerant
+# guesses at the field names. Adjust them once the real schema is known.
 _ID_KEYS = ("projectId", "project_id", "id")
 _NAME_KEYS = ("projectName", "project_name", "name")
 _STATUS_KEYS = ("status", "state")
-_LIST_KEYS = ("projects", "data", "items", "results")
 
 
 @dataclass(frozen=True)
@@ -62,26 +54,22 @@ def normalize_project(raw: Any) -> Project | None:
 
 
 def parse_projects(response: Any) -> list[Project]:
-    """Turn the projects API response into :class:`Project` objects."""
-    items = response
-    if isinstance(response, dict):
-        items = next((response[k] for k in _LIST_KEYS if isinstance(response.get(k), list)), None)
-    if not isinstance(items, list):
-        raise APIError("Could not find a project list in the backend response.")
-    projects = [p for p in (normalize_project(i) for i in items) if p]
-    return projects
+    """Turn the projects API response into :class:`Project` objects.
+
+    Accepts a list of records, or one wrapped in an envelope such as
+    ``{"data": {"content": [...]}}``. Raises :class:`ResponseFormatError` if no
+    list of records can be found.
+    """
+    items = response if isinstance(response, list) else extract_rows(response)
+    if items is None:
+        raise ResponseFormatError("Could not find a project list in the backend response.")
+    return [p for p in (normalize_project(i) for i in items) if p]
 
 
-def fetch_projects(client: ApiClient, config: dict[str, Any]) -> list[Project]:
+def fetch_projects(client: ApiClient) -> list[Project]:
     """Retrieve the projects the authenticated user can access."""
-    endpoint = cfg.get_endpoint(config, PROJECTS_ENDPOINT_KEY)
-    if not endpoint:
-        raise EndpointNotConfiguredError(
-            "The 'accessible projects' endpoint is not configured yet (API contract pending).",
-            hint="Set endpoints.projects in ~/.scaleinn/config.json once it is available.",
-        )
     log.info("Fetching accessible projects")
-    return parse_projects(client.get(endpoint))
+    return parse_projects(auth_operations.list_projects(client))
 
 
 # ------------------------------------------------------------- selection
@@ -105,7 +93,7 @@ def choose_project(projects: list[Project]) -> Project:
 
 
 def prompt_project_manually() -> Project:
-    """Fallback while the projects API is not configured."""
+    """Fallback when the projects list cannot be read from the backend."""
     project_id = click.prompt("Project ID").strip()
     name = click.prompt("Project name (optional)", default=project_id, show_default=False).strip()
     return Project(project_id, name or project_id)

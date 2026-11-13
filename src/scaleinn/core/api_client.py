@@ -19,7 +19,7 @@ from typing import Any
 import requests
 import urllib3
 
-from scaleinn.core.config import connection_warnings
+from scaleinn.core.config import DEFAULT_SERVICE, connection_warnings, service_url
 from scaleinn.core.exceptions import (
     APIError,
     AuthenticationError,
@@ -50,7 +50,6 @@ class ApiClient:
         self._config = config
         self._tokens = token_manager
         self._http = http or requests.Session()
-        self.base_url: str = config["api_url"]
         self._verify = self._resolve_verify(config)
         self._timeout = (CONNECT_TIMEOUT, config.get("timeout") or DEFAULT_READ_TIMEOUT)
 
@@ -58,7 +57,7 @@ class ApiClient:
             if warn:
                 terminal.warn_once(message)
             log.warning(message)
-        if config["protocol"] == "https" and not config["verify_ssl"]:
+        if not config["verify_ssl"]:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # ----------------------------------------------------------- helpers
@@ -76,8 +75,8 @@ class ApiClient:
             return str(Path(ca_bundle).expanduser())
         return bool(config["verify_ssl"])
 
-    def _url(self, path: str) -> str:
-        return self.base_url + (path if path.startswith("/") else "/" + path)
+    def _url(self, path: str, service: str) -> str:
+        return service_url(self._config, service) + (path if path.startswith("/") else "/" + path)
 
     @staticmethod
     def _error_message(response: requests.Response) -> str:
@@ -123,12 +122,15 @@ class ApiClient:
         params: dict[str, Any] | None = None,
         json: Any = None,
         auth: bool = True,
+        service: str = DEFAULT_SERVICE,
         _retried: bool = False,
     ) -> Any:
         """Send a request and return the parsed JSON body (``None`` if empty).
 
         Args:
             auth: Attach the bearer token. Login/refresh calls pass ``False``.
+            service: Which backend base URL to use (``"api"`` by default, or e.g.
+                ``"object_storage"``); see ``SERVICES`` in :mod:`scaleinn.core.config`.
 
         Request bodies and headers are never logged.
         """
@@ -149,7 +151,7 @@ class ApiClient:
         try:
             response = self._http.request(
                 method,
-                self._url(path),
+                self._url(path, service),
                 params=params,
                 json=json,
                 headers=headers,
@@ -173,15 +175,15 @@ class ApiClient:
         except requests.exceptions.ConnectionError as exc:
             log.error("Connection failed: %s", type(exc).__name__)
             raise NetworkError(
-                f"Could not connect to the Scaleinn backend at {self.base_url}.",
-                hint="Check the API URL ('scaleinn configure --api-url ...') and your network.",
+                f"Could not connect to the Scaleinn backend at {service_url(self._config, service)}.",
+                hint="Check the backend URL (see 'scaleinn configure --help') and your network.",
             ) from exc
         except requests.exceptions.RequestException as exc:
             log.error("Request failed: %s", type(exc).__name__)
             raise NetworkError(f"Request failed: {type(exc).__name__}.") from exc
 
         log.info("Backend response received: HTTP %s", response.status_code)
-        return self._handle_response(method, path, response, params, json, auth, _retried)
+        return self._handle_response(method, path, response, params, json, auth, service, _retried)
 
     def _handle_response(
         self,
@@ -191,6 +193,7 @@ class ApiClient:
         params: dict[str, Any] | None,
         json: Any,
         auth: bool,
+        service: str,
         retried: bool,
     ) -> Any:
         status = response.status_code
@@ -200,7 +203,9 @@ class ApiClient:
                 raise AuthenticationError("Authentication failed: the credentials were rejected.")
             if not retried and self._try_refresh():
                 log.info("Retrying request once after token refresh")
-                return self.request(method, path, params=params, json=json, auth=True, _retried=True)
+                return self.request(
+                    method, path, params=params, json=json, auth=True, service=service, _retried=True
+                )
             raise AuthenticationError(
                 "Your session is invalid or has expired (HTTP 401).",
                 hint="Run 'scaleinn configure' to sign in again.",

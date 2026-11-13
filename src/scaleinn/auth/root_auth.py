@@ -1,12 +1,13 @@
 """Root user login: username + password.
 
-PLACEHOLDER - the real endpoint and payload will be supplied separately. Until
-then the endpoint must be configured in ``~/.scaleinn/config.json``::
+Backend contract::
 
-    "endpoints": {"root_login": "/api/v1/..."}
+    POST {api_url}/api/v1/orca/user/login
+    {"usernameOrEmail": "<username>", "password": "<password>"}
 
-and the payload field names below are provisional. Nothing else in the code base
-depends on them.
+The login endpoint is shared with IAM users (see :mod:`scaleinn.auth.iam_auth`),
+which send their e-mail address in the same ``usernameOrEmail`` field. The path can
+be overridden with ``endpoints.root_login`` in ``~/.scaleinn/config.json``.
 """
 
 from __future__ import annotations
@@ -14,10 +15,9 @@ from __future__ import annotations
 from typing import Any
 
 ENDPOINT_KEY = "root_login"
-DEFAULT_ENDPOINT: str | None = None  # TODO: set once the API contract is supplied
+DEFAULT_ENDPOINT: str | None = "/api/v1/orca/user/login"
 IDENTIFIER_LABEL = "Username"
 
 
 def build_payload(username: str, password: str) -> dict[str, Any]:
-    # TODO: confirm field names against the real contract.
-    return {"username": username, "password": password}
+    return {"usernameOrEmail": username, "password": password}

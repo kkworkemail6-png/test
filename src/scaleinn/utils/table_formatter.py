@@ -14,12 +14,17 @@ from typing import Any, Iterable, Sequence
 MAX_CELL_WIDTH = 60
 
 
-def extract_rows(data: Any) -> list[dict] | None:
+MAX_NESTING = 2  # how many levels of envelope ({"data": {"content": [...]}}) to look through
+
+
+def extract_rows(data: Any, _depth: int = 0) -> list[dict] | None:
     """Find a list of records in a response, without assuming field names.
 
     Returns:
         * the list itself if ``data`` is a list of dicts;
         * the only list-of-dicts value if ``data`` is a dict with exactly one;
+        * failing that, the same search inside the only nested dict that yields
+          one (up to ``MAX_NESTING`` levels, e.g. ``{"data": {"content": [...]}}``);
         * ``None`` if no unambiguous list of records can be found (the caller
           should then fall back to JSON output).
     """
@@ -33,6 +38,16 @@ def extract_rows(data: Any) -> list[dict] | None:
         ]
         if len(candidates) == 1:
             return candidates[0]
+        if not candidates and _depth < MAX_NESTING:
+            nested = [
+                rows
+                for rows in (
+                    extract_rows(value, _depth + 1) for value in data.values() if isinstance(value, dict)
+                )
+                if rows
+            ]
+            if len(nested) == 1:
+                return nested[0]
     return None
 
 

@@ -24,10 +24,11 @@ def test_get_sends_bearer_header_params_and_json_headers(http, make_client, logg
     call = http.calls[0]
     assert result == {"ok": True}
     assert call["method"] == "GET"
-    assert call["url"] == "https://app.scaleinn.in:8086/api/v1/x"
+    assert call["url"] == "https://app.scaleinn.in:8443/api/v1/x"
     assert call["params"] == {"projectId": "p", "search": ""}
     assert call["headers"]["Authorization"] == f"Bearer {TEST_TOKEN}"
     assert call["headers"]["Accept"] == "application/json"
+    assert call["headers"]["User-Agent"].startswith("scaleinn-cli/")
     assert call["headers"]["Content-Type"] == "application/json"
 
 
@@ -44,7 +45,7 @@ def test_post_sends_json_body(http, make_client, logged_in):
     assert http.calls[0]["json"] == {"name": "a"}
 
 
-@pytest.mark.parametrize("url", ["http://192.168.192.234:8080", "https://app.scaleinn.in:8086"])
+@pytest.mark.parametrize("url", ["http://192.168.192.234:8080", "https://app.scaleinn.in:8443"])
 def test_http_and_https_base_urls_are_used_as_configured(http, make_client, logged_in, url):
     http.add(200, {})
     make_client(api_url=url).get("/ping")

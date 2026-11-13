@@ -33,7 +33,7 @@ def _apply_connection_options(session: Session, api_url, verify_ssl, ca_bundle) 
 
 
 @click.command("configure", help="Sign in to Scaleinn and select the active project.")
-@click.option("--api-url", help="Backend URL, e.g. https://app.scaleinn.in:8086 (http:// is also supported).")
+@click.option("--api-url", help="Backend URL, e.g. https://app.scaleinn.in:8443 (http:// is also supported).")
 @click.option("--verify-ssl/--no-verify-ssl", default=None, help="Enable/disable TLS certificate verification.")
 @click.option(
     "--ca-bundle",

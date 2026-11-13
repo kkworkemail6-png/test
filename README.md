@@ -7,7 +7,7 @@ Command-line interface for the **Scaleinn** cloud platform, architecturally insp
 scaleinn --version
 scaleinn configure
 scaleinn object-storage list-buckets [--search TEXT] [--output json|table]
-scaleinn ct list [--output json|table]
+scaleinn ct list [--search TEXT] [--page N] [--size N] [--sort-by FIELD] [--sort-direction ASC|DESC] [--output json|table]
 ```
 
 ## Contents
@@ -48,9 +48,9 @@ Implemented now:
 
 | Area | Status |
 |------|--------|
-| `configure` (root / IAM login, project selection) | Done. Login/refresh/projects endpoints are **placeholders** until the API contracts arrive (see [section 22](#22-pending-api-contracts)). |
+| `configure` (root / IAM login, project selection) | Login is integrated with the real `POST /api/v1/orca/user/login` API. The accessible-projects API and token refresh are **placeholders** until their contracts arrive (see [section 22](#22-pending-api-contracts)); until then the project ID is typed in. |
 | `object-storage list-buckets` | Done, against the real `get-all-bucket` API. |
-| `ct list` | Command skeleton ready; endpoint is configurable until the contract is supplied. |
+| `ct list` | Done, against the real `GET /api/v1/orca/compute/lxc/get-list-by-projectid` API (search, paging and sorting supported). |
 
 ## 2. Architecture
 
@@ -154,7 +154,7 @@ scaleinn-cli/
 |   |   |-- logger.py               logging setup + secret redaction
 |   |   |-- output.py               --output option and table/JSON rendering
 |   |
-|   |-- auth/                       backend login contracts (PLACEHOLDERS)
+|   |-- auth/                       backend login / refresh contracts
 |   |   |-- root_auth.py            root endpoint key + payload
 |   |   |-- iam_auth.py             IAM endpoint key + payload
 |   |   |-- login.py                dispatcher + login-response parsing
@@ -255,7 +255,7 @@ Options of `scaleinn configure`:
 
 ```json
 {
-    "api_url": "https://app.scaleinn.in:8086",
+    "api_url": "https://app.scaleinn.in:8443",
     "protocol": "https",
     "auth_type": "root",
     "project_id": "exch4bt42y",
@@ -278,8 +278,17 @@ prompt, sent once to the root-login endpoint, and discarded. Only the returned t
 Choose **2. IAM User** and enter the *Login ID* (the registered e-mail address) and *Password*. The
 flow is identical to root login but uses the IAM-login endpoint and payload.
 
-Both login types are implemented in `auth/`; their endpoint paths and payload field names are
-placeholders (see [section 22](#22-pending-api-contracts)).
+Both login types are implemented in `auth/` and use the same backend API:
+
+```text
+POST {api_url}/api/v1/orca/user/login
+{"usernameOrEmail": "<username or login e-mail>", "password": "<password>"}
+```
+
+The response is searched for the access token (`access_token`, `accessToken` or `token`, also inside
+a `data` envelope), an optional refresh token and an optional expiry (`expires_in` / `expires_at`).
+If the backend later needs an explicit root/IAM discriminator, change `auth/root_auth.py` /
+`auth/iam_auth.py` (the only places that know the payload).
 
 ## 10. Project selection
 
@@ -335,17 +344,28 @@ Once the schema is confirmed, pass explicit columns to `render(...)` in
 ```bash
 scaleinn ct --help
 scaleinn ct list
+scaleinn ct list --search web --page 0 --size 50
+scaleinn ct list --sort-by createdDate --sort-direction ASC
 scaleinn ct list --output json
 ```
 
-The CT endpoint is not known yet, so `ct list` reports that the endpoint is not configured. Once you
-have it, either set it in `config.json` (`"endpoints": {"ct_list": "/api/..."}`) or hard-code the
-path in `services/ct/operations.py`.
+This calls:
+
+```text
+GET {api_url}/api/v1/orca/compute/lxc/get-list-by-projectid
+    ?projectId=<selected project>&sortBy=createdDate&sortDirection=DESC&page=0&size=100&search=
+Authorization: Bearer <access token>
+```
+
+The values shown are the defaults of `--sort-by`, `--sort-direction`, `--page`, `--size` and
+`--search`. The response schema has not been confirmed, so `--output json` prints the backend
+response unchanged, and the table view works on any single list of records (also inside a `data`
+envelope such as `{"data": {"content": [...]}}`), falling back to JSON otherwise.
 
 ## 14. HTTP / HTTPS configuration
 
 ```bash
-scaleinn configure --api-url https://app.scaleinn.in:8086
+scaleinn configure --api-url https://app.scaleinn.in:8443
 scaleinn configure --api-url http://192.168.192.234:8080 --project-only
 scaleinn configure --ca-bundle /etc/ssl/my-company-ca.pem --project-only
 scaleinn configure --no-verify-ssl --project-only     # development/testing only
@@ -474,31 +494,31 @@ and do not use `requests` outside `core/api_client.py`.
 
 ## 22. Pending API contracts
 
-These are deliberately **not invented**; each is isolated in one place:
+Integrated: `POST /api/v1/orca/user/login`, `GET /api/v1/orca/compute/lxc/get-list-by-projectid` and
+`GET /api/v1/object-storage/bucket/get-all-bucket`.
+
+Still **not invented**; each is isolated in one place:
 
 | Item | Where | How to provide it |
 |------|-------|-------------------|
-| Root login endpoint + payload | `auth/root_auth.py` | `endpoints.root_login` in `config.json`, then confirm the payload fields. |
-| IAM login endpoint + payload | `auth/iam_auth.py` | `endpoints.iam_login`, then confirm the payload fields. |
-| Login/refresh response format | `auth/login.py` (`parse_token_response`) | Adjust the key names if they differ. |
-| Token refresh | `auth/refresh.py` | `endpoints.refresh`. Without it, expired sessions require `scaleinn configure`. |
-| Accessible-projects API + response | `core/project_manager.py` | `endpoints.projects`; adjust `normalize_project` field names. |
-| CT list endpoint, parameters, response | `services/ct/operations.py` | `endpoints.ct_list`; confirm that `projectId` is the right parameter. |
-| Bucket list response schema | `services/object_storage/commands.py` | Pass explicit columns to `render`. |
+| Accessible-projects API + response | `core/project_manager.py` | Set `endpoints.projects` in `config.json` and adjust the field names in `normalize_project`. Until then `configure` asks for the project ID/name. |
+| Token refresh | `auth/refresh.py` | Set `endpoints.refresh` (and confirm the payload). Without it, expired sessions require `scaleinn configure`. |
+| Login response format | `auth/login.py` (`parse_token_response`) | Currently tolerant of common key names; adjust if the real response differs. |
+| Root vs IAM discriminator, if any | `auth/root_auth.py`, `auth/iam_auth.py` | Both use the shared login API today. |
+| CT / bucket list response schemas | `services/*/commands.py` | Pass explicit columns to `render`. |
 
-Example `config.json` fragment once the paths are known:
+Optional overrides in `config.json` (all have working defaults or are optional):
 
 ```json
 {
     "endpoints": {
-        "root_login": "/api/v1/...",
-        "iam_login": "/api/v1/...",
+        "root_login": "/api/v1/orca/user/login",
+        "iam_login": "/api/v1/orca/user/login",
         "refresh": "/api/v1/...",
-        "projects": "/api/v1/...",
-        "ct_list": "/api/v1/..."
+        "projects": "/api/v1/..."
     }
 }
 ```
 
-Until the login contracts exist, `scaleinn configure --with-token` lets you store an existing bearer
-token so the real bucket-listing API can be exercised end to end.
+`scaleinn configure --with-token` remains available to store an existing bearer token instead of
+logging in with a password.

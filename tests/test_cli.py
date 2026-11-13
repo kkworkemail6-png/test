@@ -114,6 +114,11 @@ def test_extract_rows():
     assert extract_rows({"a": [{"x": 1}], "b": [{"y": 1}]}) is None  # ambiguous
     assert extract_rows({"status": "ok"}) is None
     assert extract_rows(["str"]) is None
+    # envelopes: {"data": {"content": [...]}}
+    assert extract_rows({"data": {"content": [{"a": 1}], "total": 1}}) == [{"a": 1}]
+    assert extract_rows({"result": {"data": {"items": [{"a": 1}]}}}) == [{"a": 1}]
+    assert extract_rows({"x": {"rows": [{"a": 1}]}, "y": {"rows": [{"b": 2}]}}) is None  # ambiguous
+    assert extract_rows({"a": {"b": {"c": {"d": [{"x": 1}]}}}}) is None  # too deeply nested
 
 
 def test_default_output_setting_is_honoured(http, logged_in):

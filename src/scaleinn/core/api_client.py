@@ -31,6 +31,7 @@ from scaleinn.core.exceptions import (
 from scaleinn.core.logger import get_logger
 from scaleinn.core.token_manager import TokenManager
 from scaleinn.utils import terminal
+from scaleinn.version import __version__
 
 log = get_logger("api")
 
@@ -132,7 +133,11 @@ class ApiClient:
         Request bodies and headers are never logged.
         """
         method = method.upper()
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": f"scaleinn-cli/{__version__}",
+        }
         if auth:
             self._ensure_fresh_token()
             headers["Authorization"] = f"{self._tokens.token_type} {self._tokens.access_token}"

@@ -15,7 +15,7 @@ from scaleinn.core.exceptions import ConfigurationError
 from scaleinn.utils.file_utils import atomic_write_json, ensure_private_dir, read_json
 
 CONFIG_DIR_ENV = "SCALEINN_CONFIG_DIR"
-DEFAULT_API_URL = "https://app.scaleinn.in:8086"
+DEFAULT_API_URL = "https://app.scaleinn.in:8443"
 VALID_OUTPUTS = ("table", "json")
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -32,9 +32,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
 #   "ca_bundle": "/path/to/ca.pem"         custom CA certificate bundle
 #   "timeout":   30                        read timeout in seconds
 #   "endpoints": {"root_login": "/...", "iam_login": "/...", "refresh": "/...",
-#                 "projects": "/...", "ct_list": "/..."}
-#                                           backend endpoints whose API contract
-#                                           has not been supplied yet
+#                 "projects": "/..."}
+#                                           optional path overrides. "refresh" and
+#                                           "projects" have no built-in default yet
+#                                           because their API contracts have not
+#                                           been supplied
 
 
 # ---------------------------------------------------------------- locations
@@ -72,7 +74,7 @@ def validate_api_url(url: str | None) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ConfigurationError(
             f"Invalid API URL: {url!r}.",
-            hint="Use a full URL such as https://app.scaleinn.in:8086 or http://192.168.1.10:8080.",
+            hint="Use a full URL such as https://app.scaleinn.in:8443 or http://192.168.1.10:8080.",
         )
     return url.rstrip("/")
 

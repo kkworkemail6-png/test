@@ -14,7 +14,7 @@ def mode(path):
 
 def test_defaults_when_no_file_exists():
     config = cfg.load_config()
-    assert config["api_url"] == "https://app.scaleinn.in:8086"
+    assert config["api_url"] == "https://app.scaleinn.in:8443"
     assert config["protocol"] == "https"
     assert config["default_output"] == "table"
     assert config["verify_ssl"] is True
@@ -48,7 +48,7 @@ def test_no_temp_files_left_after_write():
 
 @pytest.mark.parametrize(
     "url,protocol",
-    [("https://app.scaleinn.in:8086", "https"), ("http://192.168.192.234:8080/", "http")],
+    [("https://app.scaleinn.in:8443", "https"), ("http://192.168.192.234:8080/", "http")],
 )
 def test_http_and_https_endpoints_supported(url, protocol):
     config = cfg.update_config(api_url=url)

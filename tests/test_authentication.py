@@ -12,11 +12,11 @@ from scaleinn.core import credentials
 from scaleinn.core.exceptions import (
     APIError,
     AuthenticationError,
-    EndpointNotConfiguredError,
     ValidationError,
 )
 
-LOGIN_ENDPOINTS = {"root_login": "/auth/root", "iam_login": "/auth/iam", "projects": "/projects"}
+LOGIN_PATH = "/api/v1/orca/user/login"
+PROJECTS_ENDPOINT = {"projects": "/projects"}  # the projects API contract is still pending
 PROJECT_LIST = [
     {"projectId": "exch4bt42y", "projectName": "Production", "status": "Active"},
     {"projectId": "dev00000aa", "projectName": "Development", "status": "Active"},
@@ -24,32 +24,45 @@ PROJECT_LIST = [
 
 
 # ------------------------------------------------------- login dispatcher
-def test_root_login_sends_username_password_without_auth_header(http, make_client):
-    client = make_client(endpoints=LOGIN_ENDPOINTS)
+def test_root_login_uses_documented_endpoint_and_payload_without_auth_header(http, make_client):
+    client = make_client()
     http.add(200, {"access_token": "T", "refresh_token": "R", "expires_in": 3600})
-    record = login(client, cfg.load_config(), "root", "root", "pw-123")
+    record = login(client, cfg.load_config(), "root", "root-test-user", "pw-123")
     call = http.calls[0]
-    assert call["url"].endswith("/auth/root")
-    assert call["json"] == {"username": "root", "password": "pw-123"}
+    assert call["method"] == "POST"
+    assert call["url"] == "https://app.scaleinn.in:8443" + LOGIN_PATH
+    assert call["json"] == {"usernameOrEmail": "root-test-user", "password": "pw-123"}
     assert "Authorization" not in call["headers"]
     assert record["access_token"] == "T" and record["refresh_token"] == "R"
     assert record["expires_at"]
 
 
-def test_iam_login_uses_login_id_and_its_own_endpoint(http, make_client):
-    client = make_client(endpoints=LOGIN_ENDPOINTS)
+def test_iam_login_sends_the_email_as_usernameOrEmail(http, make_client):
+    client = make_client()
     http.add(200, {"accessToken": "T2"})
     record = login(client, cfg.load_config(), "iam", "user@example.com", "pw")
-    assert http.calls[0]["url"].endswith("/auth/iam")
-    assert http.calls[0]["json"]["loginId"] == "user@example.com"
+    assert http.calls[0]["url"].endswith(LOGIN_PATH)
+    assert http.calls[0]["json"] == {"usernameOrEmail": "user@example.com", "password": "pw"}
     assert record["access_token"] == "T2"
 
 
+@pytest.mark.parametrize("auth_type,key", [("root", "root_login"), ("iam", "iam_login")])
+def test_login_endpoint_can_be_overridden_in_config(http, make_client, auth_type, key):
+    client = make_client(endpoints={key: "/custom/login"})
+    http.add(200, {"access_token": "T"})
+    login(client, cfg.load_config(), auth_type, "u", "p")
+    assert http.calls[0]["url"].endswith("/custom/login")
+
+
 @pytest.mark.parametrize("auth_type", ["root", "iam"])
-def test_login_without_configured_endpoint_does_not_invent_one(http, make_client, auth_type):
-    with pytest.raises(EndpointNotConfiguredError):
-        login(make_client(), cfg.load_config(), auth_type, "u", "p")
-    assert http.calls == []
+def test_login_does_not_log_the_password(http, make_client, auth_type):
+    from scaleinn.core.logger import register_secret, setup_logging
+
+    setup_logging()
+    register_secret("pw-secret-value")
+    http.add(200, {"access_token": "T"})
+    login(make_client(), cfg.load_config(), auth_type, "u", "pw-secret-value")
+    assert "pw-secret-value" not in cfg.log_path().read_text()
 
 
 def test_unknown_auth_type(make_client):
@@ -58,7 +71,7 @@ def test_unknown_auth_type(make_client):
 
 
 def test_rejected_credentials(http, make_client):
-    client = make_client(endpoints=LOGIN_ENDPOINTS)
+    client = make_client()
     http.add(401, {"message": "invalid"})
     with pytest.raises(AuthenticationError):
         login(client, cfg.load_config(), "root", "root", "wrong")
@@ -84,7 +97,7 @@ def run_configure(args, user_input):
 
 
 def test_configure_root_user_end_to_end(http):
-    cfg.update_config(endpoints=LOGIN_ENDPOINTS)
+    cfg.update_config(endpoints=PROJECTS_ENDPOINT)
     http.add(200, {"access_token": "TOKEN-R", "refresh_token": "REF-R", "expires_in": 3600})
     http.add(200, PROJECT_LIST)
 
@@ -111,21 +124,44 @@ def test_configure_root_user_end_to_end(http):
 
 
 def test_configure_iam_user_selects_second_project(http):
-    cfg.update_config(endpoints=LOGIN_ENDPOINTS)
+    cfg.update_config(endpoints=PROJECTS_ENDPOINT)
     http.add(200, {"access_token": "TOKEN-I"}).add(200, PROJECT_LIST)
 
     result = run_configure([], "2\nme@example.com\npw-iam\n2\n")
 
     assert result.exit_code == 0, result.output
-    assert http.calls[0]["json"] == {"loginId": "me@example.com", "password": "pw-iam"}
+    assert http.calls[0]["json"] == {"usernameOrEmail": "me@example.com", "password": "pw-iam"}
     config = json.loads(cfg.config_path().read_text())
     assert (config["auth_type"], config["project_id"]) == ("iam", "dev00000aa")
 
 
-def test_configure_with_login_endpoint_missing_explains_how_to_proceed(http):
-    result = run_configure([], "1\nroot\npw\n")
-    assert result.exit_code == 6
-    assert "endpoints.root_login" in result.output and "--with-token" in result.output
+def test_configure_password_login_then_manual_project_while_projects_api_is_pending(http):
+    """The login API is integrated; the projects API is not, so the project is typed in."""
+    http.add(200, {"accessToken": "TOK-1", "refreshToken": "REF-1"})
+    result = run_configure([], "1\nroot-test-user\npw-xyz\nexch4bt42y\nProduction\n")
+    assert result.exit_code == 0, result.output
+    assert len(http.calls) == 1 and http.calls[0]["url"].endswith(LOGIN_PATH)
+    assert "Authentication successful!" in result.output
+    assert "Enter the project details manually" in result.output
+    assert json.loads(cfg.credentials_path().read_text())["access_token"] == "TOK-1"
+    config = json.loads(cfg.config_path().read_text())
+    assert (config["auth_type"], config["project_id"]) == ("root", "exch4bt42y")
+    assert "pw-xyz" not in result.output + cfg.config_path().read_text() + cfg.log_path().read_text()
+
+
+def test_configure_wrong_password_stores_nothing(http):
+    http.add(401, {"message": "bad credentials"})
+    result = run_configure([], "1\nroot-test-user\nwrong\n")
+    assert result.exit_code == 3
+    assert "rejected" in result.output
+    assert not cfg.credentials_path().exists()
+    assert not cfg.config_path().exists() or json.loads(cfg.config_path().read_text())["project_id"] is None
+
+
+def test_configure_login_response_without_token_is_an_error(http):
+    http.add(200, {"message": "ok but no token"})
+    result = run_configure([], "1\nroot-test-user\npw\n")
+    assert result.exit_code == 7
     assert not cfg.credentials_path().exists()
 
 
@@ -165,7 +201,7 @@ def test_configure_saves_connection_options_without_touching_project(http, logge
 
 
 def test_configure_no_projects_available(http):
-    cfg.update_config(endpoints=LOGIN_ENDPOINTS)
+    cfg.update_config(endpoints=PROJECTS_ENDPOINT)
     http.add(200, {"access_token": "T"}).add(200, [])
     assert run_configure([], "1\nroot\npw\n").exit_code == 2
 

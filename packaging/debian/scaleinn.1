@@ -1,0 +1,51 @@
+.TH SCALEINN 1 "November 2026" "scaleinn-cli" "User Commands"
+.SH NAME
+scaleinn \- command-line interface for the Scaleinn cloud platform
+.SH SYNOPSIS
+.B scaleinn
+[\fB\-\-debug\fR]
+\fICOMMAND\fR [\fIARGS\fR]
+.br
+.B scaleinn \-\-version
+.SH DESCRIPTION
+.B scaleinn
+is a lightweight client for the Scaleinn backend APIs. It authenticates a root
+or IAM user, remembers the selected project, and manages cloud resources through
+the backend. It never contacts infrastructure services directly.
+.SH COMMANDS
+.TP
+.B configure
+Sign in and select the active project. Options:
+\fB\-\-api\-url\fR, \fB\-\-verify\-ssl\fR/\fB\-\-no\-verify\-ssl\fR,
+\fB\-\-ca\-bundle\fR, \fB\-\-project\-only\fR, \fB\-\-with\-token\fR.
+.TP
+.B object\-storage list\-buckets [\-\-search TEXT] [\-\-output json|table]
+List the buckets of the selected project.
+.TP
+.B ct list [\-\-output json|table]
+List the CTs (Linux Containers) of the selected project.
+.TP
+.B version
+Show the version.
+.SH OPTIONS
+.TP
+.B \-\-debug
+Print debug logs to standard error. Secrets are always redacted.
+.TP
+.B \-\-version
+Show the version and exit.
+.SH FILES
+.TP
+.I ~/.scaleinn/config.json
+API URL, selected project and other non-secret settings.
+.TP
+.I ~/.scaleinn/credentials.json
+Access and refresh tokens (mode 600). Passwords are never stored.
+.TP
+.I ~/.scaleinn/logs/scaleinn.log
+Log file.
+.SH EXIT STATUS
+0 success; 1 general error; 2 invalid usage or input; 3 authentication failure;
+4 access denied; 5 network error; 6 local configuration problem; 7 backend error.
+.SH SEE ALSO
+Full documentation: README.md in the source distribution.

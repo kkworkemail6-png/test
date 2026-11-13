@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: scaleinn-cli
+Source: https://scaleinn.in
+
+Files: *
+Copyright: 2026 Scaleinn
+License: Proprietary
+ All rights reserved.
+ .
+ PLACEHOLDER: replace this text with the real license of the project before
+ distributing the package outside your organization.

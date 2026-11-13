@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Debian build output
+*.deb
+*.buildinfo
+*.changes
+/debian/
+.scaleinn-build/
+
+# Never commit local Scaleinn state
+.scaleinn/
+credentials.json

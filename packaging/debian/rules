@@ -1,0 +1,8 @@
+#!/usr/bin/make -f
+
+export PYBUILD_NAME=scaleinn
+# Tests live in the source tree, not in the pybuild build directory.
+export PYBUILD_TEST_ARGS=-p no:cacheprovider {dir}/tests
+
+%:
+	dh $@ --buildsystem=pybuild

@@ -1,0 +1,8 @@
+scaleinn-cli (1.0.0) unstable; urgency=medium
+
+  * Initial release.
+  * Root and IAM authentication, project selection.
+  * Object Storage: list-buckets.
+  * CT: list (skeleton, endpoint configurable).
+
+ -- Scaleinn Maintainers <maintainers@scaleinn.in>  Thu, 12 Nov 2026 15:00:00 +0530

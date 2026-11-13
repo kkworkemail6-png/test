@@ -1,0 +1,84 @@
+import json
+
+import pytest
+from click.testing import CliRunner
+
+from scaleinn.core import config as cfg
+from scaleinn.core import project_manager as pm
+from scaleinn.core.exceptions import (
+    APIError,
+    EndpointNotConfiguredError,
+    ProjectNotSelectedError,
+)
+
+PROJECTS = [
+    pm.Project("exch4bt42y", "Production", "Active"),
+    pm.Project("dev00000aa", "Development", "Active"),
+    pm.Project("tst11111bb", "Testing", None),
+]
+
+
+def test_parse_projects_from_list_and_wrapped_dict():
+    raw = [{"projectId": "p1", "projectName": "One", "status": "Active"}, {"id": 2, "name": "Two"}]
+    assert pm.parse_projects(raw) == [pm.Project("p1", "One", "Active"), pm.Project("2", "Two", None)]
+    assert len(pm.parse_projects({"data": raw})) == 2
+
+
+def test_parse_projects_skips_unusable_items_and_rejects_bad_shape():
+    assert pm.parse_projects([{"nothing": 1}, "x"]) == []
+    with pytest.raises(APIError):
+        pm.parse_projects({"unexpected": "shape"})
+
+
+def test_render_projects_table_lists_all_projects():
+    table = pm.render_projects(PROJECTS)
+    for project in PROJECTS:
+        assert project.name in table and project.id in table
+    assert "| 1 " in table and "| 3 " in table
+
+
+def test_choose_project_selects_by_number(monkeypatch):
+    monkeypatch.setattr("click.prompt", lambda *a, **k: 2)
+    assert pm.choose_project(PROJECTS).id == "dev00000aa"
+
+
+def test_choose_project_rejects_out_of_range():
+    # real prompt through CliRunner: 9 is invalid, then 1 is accepted
+    import click
+
+    @click.command()
+    def cmd():
+        click.echo(pm.choose_project(PROJECTS).name)
+
+    result = CliRunner().invoke(cmd, input="9\n1\n")
+    assert "Production" in result.output
+    assert "not in the range" in result.output
+
+
+def test_save_selected_project_changes_only_project_fields():
+    cfg.update_config(auth_type="iam", default_output="json")
+    pm.save_selected_project(PROJECTS[1])
+    stored = json.loads(cfg.config_path().read_text())
+    assert (stored["project_id"], stored["project_name"]) == ("dev00000aa", "Development")
+    assert stored["auth_type"] == "iam" and stored["default_output"] == "json"
+
+
+def test_get_selected_project_id():
+    with pytest.raises(ProjectNotSelectedError):
+        pm.get_selected_project_id(cfg.load_config())
+    cfg.update_config(project_id="abc")
+    assert pm.get_selected_project_id(cfg.load_config()) == "abc"
+
+
+def test_fetch_projects_requires_configured_endpoint(make_client):
+    client = make_client()
+    with pytest.raises(EndpointNotConfiguredError):
+        pm.fetch_projects(client, cfg.load_config())
+
+
+def test_fetch_projects_uses_configured_endpoint(http, make_client, logged_in):
+    client = make_client(endpoints={"projects": "/api/v1/projects"})
+    http.add(200, [{"projectId": "p9", "projectName": "Nine"}])
+    projects = pm.fetch_projects(client, cfg.load_config())
+    assert projects == [pm.Project("p9", "Nine", None)]
+    assert http.calls[0]["url"].endswith("/api/v1/projects")

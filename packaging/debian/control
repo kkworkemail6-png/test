@@ -1,0 +1,31 @@
+Source: scaleinn-cli
+Section: utils
+Priority: optional
+Maintainer: Scaleinn Maintainers <maintainers@scaleinn.in>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ dh-sequence-python3,
+ pybuild-plugin-pyproject,
+ python3-all,
+ python3-setuptools,
+ python3-click,
+ python3-requests,
+ python3-pytest <!nocheck>,
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: scaleinn-cli
+# The code is pure Python. "amd64" matches the requested file name
+# (scaleinn-cli_1.0.0_amd64.deb); change to "all" to get one package for every
+# architecture (scaleinn-cli_1.0.0_all.deb).
+Architecture: amd64
+Depends: ${python3:Depends}, ${misc:Depends}
+Description: Command-line interface for the Scaleinn cloud platform
+ The Scaleinn CLI is a lightweight client for the Scaleinn backend APIs. It
+ lets you sign in (root or IAM user), select a project, and manage cloud
+ resources such as Object Storage buckets and CTs (Linux Containers) from the
+ terminal.
+ .
+ Configuration and tokens are stored per user in ~/.scaleinn and are not
+ removed when the package is uninstalled.

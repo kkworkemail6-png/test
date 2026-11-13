@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scaleinn-cli"
+dynamic = ["version"]
+description = "Command-line interface for the Scaleinn cloud platform"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+authors = [{ name = "Scaleinn" }]
+dependencies = [
+    "click>=8.0",
+    "requests>=2.25",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+scaleinn = "scaleinn.main:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "scaleinn.version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

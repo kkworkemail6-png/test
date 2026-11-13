@@ -6,6 +6,7 @@ import click
 
 from scaleinn.commands.configure import configure
 from scaleinn.commands.version import version, version_string
+from scaleinn.core.command_groups import SectionedGroup
 from scaleinn.core.exceptions import ScaleinnError
 from scaleinn.core.logger import get_logger, setup_logging
 from scaleinn.core.session import Session
@@ -15,8 +16,8 @@ from scaleinn.utils import terminal
 log = get_logger("cli")
 
 
-class ScaleinnGroup(click.Group):
-    """Turns :class:`ScaleinnError` into a clean message and a stable exit code."""
+class ScaleinnGroup(SectionedGroup):
+    """Root group: sectioned help, plus :class:`ScaleinnError` -> clean message and exit code."""
 
     def invoke(self, ctx: click.Context):
         try:
@@ -55,6 +56,5 @@ def cli(ctx: click.Context, debug: bool) -> None:
     log.info("CLI initialized")
 
 
-cli.add_command(configure)
-cli.add_command(version)
-register_services(cli)
+cli.add_section("General", configure, version)
+register_services(cli)  # adds one titled section per service family

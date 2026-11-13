@@ -28,6 +28,27 @@ List the CTs (Linux Containers) of the selected project.
 .TP
 .B version
 Show the version.
+.PP
+Service commands (run \fBscaleinn\fR \fICOMMAND\fR \fB\-\-help\fR for details). Services marked
+with * are skeletons without API commands yet.
+.TP
+.B ice *
+ICE virtual machines.
+.TP
+.B network
+Networking category: vpc *, shared\-vpc *, ipam *, router *, security\-group *, reserved\-ip *,
+cloud\-dns *. Each is also a top\-level command.
+.TP
+.B block\-storage
+Block storage category: network\-storage *, additional\-disks *, snapshot *, os\-disks *.
+Each is also a top\-level command.
+.TP
+.B images
+Images category: marketplace\-images *, project\-images *. Each is also a top\-level command.
+.TP
+.B managed\-services
+Managed services category: database *, docker *, load\-balancer *, waf *, vps *, alert\-manager *.
+Each is also a top\-level command.
 .SH OPTIONS
 .TP
 .B \-\-debug

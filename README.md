@@ -52,6 +52,24 @@ Implemented now:
 | `object-storage list-buckets` | Done, against the real `get-all-bucket` API (served from its own URL, port 8086). |
 | `ct list` | Done, against the real `GET /api/v1/orca/compute/lxc/get-list-by-projectid` API (search, paging and sorting supported). |
 
+### Services
+
+`scaleinn --help` lists every service in sections. Each service is a top-level command
+(`scaleinn cloud-dns --help`), and the grouped ones also exist one layer down in their category
+(`scaleinn network cloud-dns --help`); both paths run the same command.
+
+| Section | Category command | Services |
+|---------|------------------|----------|
+| Compute | | `ice` (virtual machines), `ct` (Linux containers, implemented) |
+| Network | `network` | `vpc`, `shared-vpc`, `ipam`, `router`, `security-group`, `reserved-ip`, `cloud-dns` |
+| Storage | `block-storage` | `network-storage`, `additional-disks`, `snapshot`, `os-disks`; plus `object-storage` (implemented) |
+| Images | `images` | `marketplace-images`, `project-images` |
+| Managed Services | `managed-services` | `database` (DBaaS), `docker` (Docker as a Service), `load-balancer`, `waf`, `vps`, `alert-manager` |
+
+Only `object-storage` and `ct` have API commands so far. All other services are **skeletons**: the
+command group, `operations.py` and `models.py` exist and `--help` works, but no API commands are
+implemented until their API contracts are supplied.
+
 ## 2. Architecture
 
 ```text
@@ -154,6 +172,7 @@ scaleinn-cli/
 |   |   |-- exceptions.py           error classes + exit codes
 |   |   |-- logger.py               logging setup + secret redaction
 |   |   |-- output.py               --output option and table/JSON rendering
+|   |   |-- command_groups.py       OrderedGroup / SectionedGroup (how --help lists commands)
 |   |
 |   |-- auth/                       account-level backend APIs
 |   |   |-- operations.py           projects, organisations and my-policies APIs (one file)
@@ -169,6 +188,15 @@ scaleinn-cli/
 |   |-- services/
 |   |   |-- __init__.py             register_services(): the one place services are listed
 |   |   |-- object_storage/{commands,operations,models}.py
+|   |   |-- ice/{commands,operations,models}.py                     skeleton
+|   |   |-- network/commands.py                                      category layer: `scaleinn network`
+|   |   |   |-- {vpc,shared_vpc,ipam,router,security_group,reserved_ip,cloud_dns}/{commands,operations,models}.py
+|   |   |-- block_storage/commands.py                                category layer
+|   |   |   |-- {network_storage,additional_disks,snapshot,os_disks}/{commands,operations,models}.py
+|   |   |-- images/commands.py                                       category layer
+|   |   |   |-- {marketplace_images,project_images}/{commands,operations,models}.py
+|   |   |-- managed_services/commands.py                             category layer
+|   |   |   |-- {database,docker,load_balancer,waf,vps,alert_manager}/{commands,operations,models}.py
 |   |   |-- ct/{commands,operations,models}.py
 |   |
 |   |-- utils/                      file_utils, table_formatter, json_formatter, terminal
@@ -491,13 +519,21 @@ survive reinstalls and upgrades. Delete that directory yourself to sign out comp
 
 ## 20. Adding a new resource module
 
-1. Create `src/scaleinn/services/<name>/` with `__init__.py`, `commands.py`, `operations.py`, `models.py`.
+1. Create `src/scaleinn/services/<name>/` with `__init__.py`, `commands.py`, `operations.py`, `models.py`
+   (inside a category: `services/<category>/<name>/`).
 2. In `operations.py` add plain functions `def list_things(session, ...)` that build the request and
    call `session.client.get/post/...` and use `session.project_id` when the API needs a project.
 3. In `commands.py` define a Click group (e.g. `@click.group("vpc")`) and commands that call the
    operations and `render(...)` the result. Add `@output_option` for `--output`.
-4. Register the group in `services/__init__.py` (`root.add_command(vpc)`).
-5. Add `tests/services/test_<name>.py`.
+4. Register it: add the group to the matching `root.add_section(...)` in `services/__init__.py`
+   (inside a category, add it to that category's `SUBMODULES` in `<category>/commands.py` as well).
+   A command that is not in a section is listed under a bare `Commands:` heading, which
+   `tests/services/test_service_skeletons.py` rejects.
+5. Add `tests/services/test_<name>.py` and add the name to the lists in `test_service_skeletons.py`.
+
+Skeleton services (`ice`, `vpc`, ...) show the pattern: replace the "No API commands are available
+yet" epilog by real commands once the API contract is supplied. A new category is a package with a
+`commands.py` that defines an `OrderedGroup` and a `SUBMODULES` tuple.
 
 All further APIs of a service go into that service's `operations.py`. Do not create a file per API,
 and do not use `requests` outside `core/api_client.py`.

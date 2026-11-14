@@ -27,6 +27,8 @@ def register_services(root: click.Group) -> None:
     from scaleinn.services.ice.commands import ice
     from scaleinn.services.images.commands import SUBMODULES as IMAGE_SERVICES
     from scaleinn.services.images.commands import images
+    from scaleinn.services.management.commands import SUBMODULES as MANAGEMENT_SERVICES
+    from scaleinn.services.management.commands import management
     from scaleinn.services.managed_services.commands import SUBMODULES as MANAGED_SERVICES
     from scaleinn.services.managed_services.commands import managed_services
     from scaleinn.services.network.commands import SUBMODULES as NETWORK_SERVICES
@@ -38,3 +40,4 @@ def register_services(root: click.Group) -> None:
     root.add_section("Storage", object_storage, block_storage, *BLOCK_STORAGE_SERVICES)
     root.add_section("Images", images, *IMAGE_SERVICES)
     root.add_section("Managed Services", managed_services, *MANAGED_SERVICES)
+    root.add_section("Management", management, *MANAGEMENT_SERVICES)

@@ -20,7 +20,7 @@ def test_defaults_when_no_file_exists():
     assert config["protocol"] == "https"
     assert config["default_output"] == "table"
     assert config["verify_ssl"] is True
-    assert config["project_id"] is None
+    assert "project_id" not in config  # the selection lives in credentials.json now
 
 
 def test_config_dir_and_file_permissions():

@@ -4,6 +4,7 @@ import pytest
 from click.testing import CliRunner
 
 from scaleinn.cli import cli
+from scaleinn.core import credentials
 from scaleinn.core.exceptions import ValidationError
 from scaleinn.services.object_storage.models import normalize_search
 
@@ -27,7 +28,7 @@ def test_list_buckets_calls_documented_endpoint_with_selected_project(http, logg
 def test_project_id_comes_from_config_not_code(http, logged_in):
     from scaleinn.core import config as cfg
 
-    cfg.update_config(project_id="another-project")
+    credentials.update_context(project=credentials.selection("another-project"))
     http.add(200, [])
     runner.invoke(cli, ["object-storage", "list-buckets"])
     assert http.calls[0]["params"]["projectId"] == "another-project"

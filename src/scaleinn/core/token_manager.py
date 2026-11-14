@@ -112,8 +112,10 @@ class TokenManager:
         return datetime.now(timezone.utc) + timedelta(seconds=skew) >= expiry
 
     # ----------------------------------------------------------- storage
-    def store(self, record: dict[str, Any]) -> None:
-        store.save_credentials(record)
+    def store(self, record: dict[str, Any], keep_context: bool = False) -> None:
+        """Persist tokens. A new login (default) clears the stored organisation, project
+        and policies; a refresh passes ``keep_context=True`` to keep them."""
+        store.save_credentials(record, keep_context=keep_context)
         self.reload()
         self._load()
         log.info("Tokens stored")
@@ -144,4 +146,4 @@ class TokenManager:
         record = refresh_tokens(client, self._config, self.refresh_token)
         if not record.get("refresh_token"):  # keep the old one if backend doesn't rotate it
             record["refresh_token"] = self.refresh_token
-        self.store(record)
+        self.store(record, keep_context=True)  # same user: keep organisation, project, policies

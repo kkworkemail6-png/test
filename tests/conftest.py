@@ -99,9 +99,13 @@ def http(monkeypatch):
 
 @pytest.fixture
 def logged_in():
-    """A configured user: tokens stored and a project selected."""
+    """A configured user: tokens, organisation and project stored in credentials.json."""
     credentials.save_credentials(make_token_record(TEST_TOKEN, refresh_token=TEST_REFRESH))
-    cfg.update_config(auth_type="root", project_id=TEST_PROJECT, project_name="Production")
+    credentials.update_context(
+        organisation=credentials.selection("org-1", "Acme"),
+        project=credentials.selection(TEST_PROJECT, "Production"),
+    )
+    cfg.update_config(auth_type="root")
 
 
 @pytest.fixture

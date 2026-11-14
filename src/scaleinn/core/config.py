@@ -28,8 +28,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "api_url": None,
     "object_storage_url": None,
     "auth_type": None,
-    "project_id": None,
-    "project_name": None,
     "default_output": "table",
     "verify_ssl": True,
 }
@@ -43,6 +41,11 @@ SERVICES: dict[str, tuple[str, str]] = {
 }
 DEFAULT_SERVICE = "api"
 
+# The selected organisation, project and the user's policies are NOT stored here: they
+# are part of the login and live in credentials.json (see core/credentials.py).
+# Older versions kept "project_id" / "project_name" in this file; they are still read
+# as a fallback and removed the next time a project is selected.
+#
 # Optional keys that are only present if the user adds them:
 #   "ca_bundle": "/path/to/ca.pem"         custom CA certificate bundle
 #   "timeout":   30                        read timeout in seconds
@@ -149,6 +152,13 @@ def update_config(**changes: Any) -> dict[str, Any]:
             merged[config_key] = normalized[config_key]
     save_config(merged)
     return normalized
+
+
+def remove_keys(*keys: str) -> None:
+    """Delete keys from ``config.json`` (no-op if the file or the keys do not exist)."""
+    raw = read_json(config_path(), None)
+    if isinstance(raw, dict) and any(key in raw for key in keys):
+        save_config({k: v for k, v in raw.items() if k not in keys})
 
 
 # ----------------------------------------------------------------- helpers

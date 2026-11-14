@@ -39,7 +39,7 @@ scaleinn ct list [--search TEXT] [--page N] [--size N] [--sort-by FIELD] [--sort
 
 ## 1. Project overview
 
-The CLI is a **lightweight API client**. It parses commands, manages login and the selected project,
+The CLI is a **lightweight API client**. It parses commands, manages login and the selected organisation and project,
 builds requests, and displays responses. It never talks to Proxmox, MinIO or any other
 infrastructure directly: every operation goes through the Scaleinn backend API, which is
 responsible for authentication, authorization (project access), resource managers and audit logs.
@@ -48,7 +48,7 @@ Implemented now:
 
 | Area | Status |
 |------|--------|
-| `configure` (root / IAM login, project selection) | Login is integrated with the real `POST /api/v1/orca/user/login` API. The accessible-projects API is integrated too; its response schema is unconfirmed, so if the response is not recognized the project ID is typed in. Token refresh is a **placeholder** (see [section 22](#22-api-contracts)). |
+| `configure` (root / IAM login, organisation + project selection, policies) | Login is integrated with the real `POST /api/v1/orca/user/login` API. The organisation, projects and my-policies APIs are integrated too; their response schemas are unconfirmed, so if a list is not recognized the organisation / project is typed in. The selection and the policies are saved in `credentials.json` next to the token. Token refresh is a **placeholder** (see [section 22](#22-api-contracts)). |
 | `object-storage list-buckets` | Done, against the real `get-all-bucket` API (served from its own URL, port 8086). |
 | `ct list` | Done, against the real `GET /api/v1/orca/compute/lxc/get-list-by-projectid` API (search, paging and sorting supported). |
 
@@ -65,10 +65,11 @@ Implemented now:
 | Storage | `block-storage` | `network-storage`, `additional-disks`, `snapshot`, `os-disks`; plus `object-storage` (implemented) |
 | Images | `images` | `marketplace-images`, `project-images` |
 | Managed Services | `managed-services` | `database` (DBaaS), `docker` (Docker as a Service), `load-balancer`, `waf`, `vps`, `alert-manager` |
+| Management | `management` | `users`, `secret-manager`, `groups`, `organizations`, `policies`, `projects` |
 
-Only `object-storage` and `ct` have API commands so far. All other services are **skeletons**: the
+Only `object-storage` and `ct` have API commands so far. All other services (including the six Management ones) are **skeletons**: the
 command group, `operations.py` and `models.py` exist and `--help` works, but no API commands are
-implemented until their API contracts are supplied.
+implemented until their API contracts are supplied. The organisation, project and policies APIs already exist in `auth/operations.py` (used by `configure`); they can be exposed through `management organizations|projects|policies` once the commands are specified.
 
 ## 2. Architecture
 
@@ -163,10 +164,12 @@ scaleinn-cli/
 |   |-- core/
 |   |   |-- env.py                  backend URLs per protocol (https / http) + optional env values
 |   |   |-- config.py               ~/.scaleinn/config.json load/update (atomic, 700/600)
-|   |   |-- credentials.py          ~/.scaleinn/credentials.json (tokens only, 600)
+|   |   |-- credentials.py          ~/.scaleinn/credentials.json (tokens + organisation + project + policies, 600)
 |   |   |-- token_manager.py        token storage, expiry tracking, refresh
 |   |   |-- authentication.py       interactive login flow (prompts, store tokens)
 |   |   |-- project_manager.py      fetch / choose / save / read the selected project
+|   |   |-- organisation_manager.py fetch / choose / save the selected organisation
+|   |   |-- policy_manager.py       fetch and store the my-policies response
 |   |   |-- api_client.py           common HTTP client (GET/POST/PUT/PATCH/DELETE)
 |   |   |-- session.py              per-invocation context passed to commands
 |   |   |-- exceptions.py           error classes + exit codes
@@ -197,6 +200,8 @@ scaleinn-cli/
 |   |   |   |-- {marketplace_images,project_images}/{commands,operations,models}.py
 |   |   |-- managed_services/commands.py                             category layer
 |   |   |   |-- {database,docker,load_balancer,waf,vps,alert_manager}/{commands,operations,models}.py
+|   |   |-- management/commands.py                                   category layer
+|   |   |   |-- {users,secret_manager,groups,organizations,policies,projects}/{commands,operations,models}.py
 |   |   |-- ct/{commands,operations,models}.py
 |   |
 |   |-- utils/                      file_utils, table_formatter, json_formatter, terminal
@@ -213,9 +218,11 @@ scaleinn-cli/
 | `cli.py` | Defines the `scaleinn` group, `--version`, `--debug`; sets up logging and the `Session`; converts `ScaleinnError` into a clean message plus exit code. |
 | `core/api_client.py` | All HTTP: base URL from config, bearer header, query/JSON, error mapping, timeouts, TLS settings, sanitized logging. |
 | `core/config.py` | Reads and updates `config.json`; `update_config(**changes)` rewrites only the given keys and preserves the rest. |
-| `core/credentials.py` | Persists only `access_token`, `refresh_token`, `token_type`, `expires_at`. A password cannot be written through it. |
+| `core/credentials.py` | The only writer of `credentials.json`: tokens (`access_token`, `refresh_token`, `token_type`, `expires_at`) plus `organisation`, `project` and `policies`. Only these whitelisted keys can be written, so a password cannot be. A new login clears the organisation, project and policies; a token refresh keeps them. |
 | `core/token_manager.py` | Expiry check, proactive refresh, refresh-and-retry support. |
-| `core/project_manager.py` | The only code that knows how the selected project is stored. Services use `session.project_id`. |
+| `core/project_manager.py` | The only code that knows how the selected project is stored (in `credentials.json`). Services use `session.project_id`. |
+| `core/organisation_manager.py` | Fetch, choose and store the selected organisation (`session.organisation`). |
+| `core/policy_manager.py` | Calls the my-policies API for the selected project and stores the response (`session.policies`). |
 | `core/session.py` | Lazily builds config, token manager and API client for one command run. |
 | `services/*/operations.py` | **One file per service holding every API operation.** Add new operations here, not in new files. |
 | `services/*/commands.py` | Click group + commands for the service; thin wrappers over `operations.py`. |
@@ -255,6 +262,16 @@ Authenticating with Scaleinn...
 
 Authentication successful!
 
+Fetching accessible organisations...
+
++---+-------------------+-----------------+
+| # | Organisation Name | Organisation ID |
++---+-------------------+-----------------+
+| 1 | Acme              | org-aaa         |
++---+-------------------+-----------------+
+
+Select organisation [1-1]: 1
+
 Fetching accessible projects...
 
 +---+--------------+--------+------------+
@@ -267,6 +284,12 @@ Fetching accessible projects...
 Select project [1-2]: 1
 
 Project selected successfully!
+
+Loading your policies...
+Policies loaded.
+
+Selected organisation: Acme
+Organisation ID: org-aaa
 Selected project: Production
 Project ID: exch4bt42y
 
@@ -280,10 +303,10 @@ Options of `scaleinn configure`:
 | `--api-url URL` | Backend URL (`https://...` or `http://...`). Saved to `config.json`. |
 | `--verify-ssl / --no-verify-ssl` | Enable/disable TLS certificate verification (disable only in controlled dev/test environments). |
 | `--ca-bundle PATH` | Custom CA certificate bundle. |
-| `--project-only` | Change only the selected project using the current login (no password prompt). |
+| `--project-only` | Keep the current login and organisation; only select another project and reload its policies (no password prompt). |
 | `--with-token` | **Interim**: supply an existing bearer token instead of a password (hidden prompt) while the login API contract is pending. |
 
-`config.json` (non-secret, mode 600 in a 700 directory):
+`config.json` (non-secret settings, mode 600 in a 700 directory; the selected organisation and project are **not** here, they are in `credentials.json`):
 
 ```json
 {
@@ -291,8 +314,6 @@ Options of `scaleinn configure`:
     "api_url": null,
     "object_storage_url": null,
     "auth_type": "root",
-    "project_id": "exch4bt42y",
-    "project_name": "Production",
     "default_output": "table",
     "verify_ssl": true
 }
@@ -331,9 +352,19 @@ If the backend later needs an explicit root/IAM discriminator, change `auth/root
 
 Project selection is centralized in `core/project_manager.py`:
 
-* `scaleinn configure` fetches the projects the authenticated user can access, shows them in a table
-  and stores the chosen **project ID and name** in `config.json`.
-* Run `scaleinn configure --project-only` at any time to switch projects without logging in again.
+* `scaleinn configure` fetches the organisations and the projects the authenticated user can access,
+  shows them in tables and stores the chosen **organisation and project (ID and name)** in
+  `~/.scaleinn/credentials.json`, the same file and path as the bearer token. It then calls the
+  my-policies API for the chosen project and stores the response there as `policies`.
+* Running `scaleinn configure` again (re-login) **replaces** the token, organisation, project and
+  policies, so nothing from a previous user is kept. A token refresh keeps them.
+* Run `scaleinn configure --project-only` at any time to switch projects without logging in again; the
+  organisation is kept and the policies are reloaded for the new project.
+* An organisation or policies problem (403, empty list, unrecognized body, failed call) only produces a
+  warning; a failed policies call removes any stale stored policies. 401, network errors and project
+  list errors still stop `configure`.
+* Older installs that kept `project_id` / `project_name` in `config.json` still work (read as a
+  fallback) until the next project selection removes them.
 * Services never read the stored value themselves; they use `session.project_id`.
 * The stored project ID is a convenience, **not an authorization**. The backend validates access on
   every request, and a 403 is reported as an access-denied error.
@@ -346,8 +377,10 @@ Project selection is centralized in `core/project_manager.py`:
 
 * `~/.scaleinn` is created with mode **700**; `credentials.json` and `config.json` with mode **600**.
 * Files are written **atomically** (temp file in the same directory, fsync, `os.replace`).
-* `credentials.json` contains only `access_token`, `refresh_token` (if provided), `token_type` and
-  `expires_at` (ISO-8601 UTC, derived from `expires_in`/`expires_at` when the backend sends them).
+* `credentials.json` contains `access_token`, `refresh_token` (if provided), `token_type` and
+  `expires_at` (ISO-8601 UTC, derived from `expires_in`/`expires_at` when the backend sends them),
+  plus the identity's context from `scaleinn configure`: `organisation` (`{id, name}`), `project`
+  (`{id, name}`) and `policies` (the my-policies response). No other key can be written.
 * Passwords are never stored. Tokens and passwords are never printed and are masked in logs.
 * **Expiry:** a token whose expiry has passed is refreshed before the request when a refresh endpoint
   is configured; otherwise the CLI asks you to run `scaleinn configure`.
@@ -478,9 +511,9 @@ pytest
 
 Tests never use the network or real credentials: `requests.Session.request` is replaced by a fake,
 and `SCALEINN_CONFIG_DIR` points to a temporary directory. They cover startup/help/version, root and
-IAM login, the `configure` flow, project selection, config and token storage (including file
+IAM login, the `configure` flow, organisation / project / policies selection, config and credentials storage (including file
 permissions), the API client (HTTP and HTTPS, 401 with/without refresh, 403, 5xx, timeouts and
-connection/TLS failures, no-retry guarantees), Object Storage listing, CT registration, output
+connection/TLS failures, no-retry guarantees), Object Storage listing, CT listing, service skeletons (including Management), output
 formatting and log redaction.
 
 ## 18. Building the Debian package
@@ -546,7 +579,7 @@ and do not use `requests` outside `core/api_client.py`.
 2. The group sets up logging (`~/.scaleinn/logs`), creates a lazy `Session`, logs "CLI initialized".
 3. Click dispatches to `object-storage` -> `list-buckets` (`services/object_storage/commands.py`).
 4. The command calls `operations.list_buckets(session, "my-bucket")`.
-5. The operation reads `session.project_id` (config loaded and validated on first use; error if no
+5. The operation reads `session.project_id` (the project stored in `credentials.json`; error if no
    project is selected) and builds `{projectId, search}`.
 6. `session.client` (the `ApiClient`) loads the access token, refreshes it first if its known expiry
    has passed, attaches `Authorization: Bearer ...`, and sends the GET using the configured URL and
@@ -564,6 +597,8 @@ Integrated (all on `apiUrl` unless noted):
 |-----|-------|
 | `POST /api/v1/orca/user/login` | `auth/login.py`, `auth/root_auth.py`, `auth/iam_auth.py` |
 | `GET /api/v1/orca/projects/list?search=&size=100&sortDir=DESC` | `auth/operations.py` (`list_projects`), used by `configure` |
+| `GET /api/v1/orca/organisation/list?size=100&search=` | `auth/operations.py` (`list_organizations`), used by `configure` |
+| `GET /api/v1/orca/policies/my-policies?projectId=` | `auth/operations.py` (`get_my_policies`), used by `configure`; the response is stored in `credentials.json` |
 | `GET /api/v1/orca/organisation/list?size=100&search=` | `auth/operations.py` (`list_organizations`) |
 | `GET /api/v1/orca/policies/my-policies?projectId=` | `auth/operations.py` (`get_my_policies`) |
 | `GET /api/v1/orca/compute/lxc/get-list-by-projectid?...` | `services/ct/operations.py` |

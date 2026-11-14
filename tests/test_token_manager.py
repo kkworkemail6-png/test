@@ -85,3 +85,28 @@ def test_refresh_without_endpoint_asks_to_login_again(make_client):
     assert client._tokens.can_refresh() is False
     with pytest.raises(AuthenticationError):
         client._tokens.refresh(client)
+
+
+def test_refresh_keeps_the_selected_organisation_project_and_policies(http, make_client):
+    cfg.update_config(endpoints={"refresh": "/auth/refresh"})
+    credentials.save_credentials(make_token_record("old", "ref-1"))
+    credentials.update_context(
+        organisation=credentials.selection("o1", "Acme"),
+        project=credentials.selection("p1", "Prod"),
+        policies={"data": ["x"]},
+    )
+    client = make_client()
+    http.add(200, {"access_token": "new-access"})
+    client._tokens.refresh(client)
+    stored = json.loads(cfg.credentials_path().read_text())
+    assert stored["access_token"] == "new-access"  # same identity: context survives the refresh
+    assert stored["organisation"]["id"] == "o1" and stored["project"]["id"] == "p1"
+    assert stored["policies"] == {"data": ["x"]}
+
+
+def test_storing_a_fresh_login_drops_the_old_context():
+    manager = TokenManager(cfg.load_config())
+    manager.store(make_token_record("t1"))
+    credentials.update_context(project=credentials.selection("p1"))
+    manager.store(make_token_record("t2"))
+    assert credentials.get_project() is None

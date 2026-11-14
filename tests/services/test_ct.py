@@ -4,6 +4,7 @@ import pytest
 from click.testing import CliRunner
 
 from scaleinn.cli import cli
+from scaleinn.core import credentials
 from scaleinn.core import config as cfg
 from scaleinn.core.exceptions import ValidationError
 from scaleinn.services.ct import models
@@ -45,7 +46,7 @@ def test_ct_list_calls_documented_endpoint_with_default_parameters(http, logged_
 
 
 def test_ct_list_project_id_comes_from_config(http, logged_in):
-    cfg.update_config(project_id="another-project")
+    credentials.update_context(project=credentials.selection("another-project"))
     http.add(200, [])
     runner.invoke(cli, ["ct", "list"])
     assert http.calls[0]["params"]["projectId"] == "another-project"

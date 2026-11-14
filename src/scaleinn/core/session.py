@@ -14,6 +14,7 @@ from typing import Any
 import click
 
 from scaleinn.core import config as cfg
+from scaleinn.core import credentials
 from scaleinn.core.api_client import ApiClient
 from scaleinn.core.logger import get_logger
 from scaleinn.core.project_manager import get_selected_project_id
@@ -45,6 +46,16 @@ class Session:
         project_id = get_selected_project_id(self.config)
         log.info("Project selected: %s", project_id)
         return project_id
+
+    @property
+    def organisation(self) -> dict[str, Any] | None:
+        """The organisation selected in ``scaleinn configure`` (``{"id", "name"}``) or ``None``."""
+        return credentials.get_organisation()
+
+    @property
+    def policies(self) -> Any:
+        """The user's policies stored by the last ``scaleinn configure`` (``None`` if none)."""
+        return credentials.get_policies()
 
     @property
     def default_output(self) -> str:

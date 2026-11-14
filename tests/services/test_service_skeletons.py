@@ -20,6 +20,7 @@ SECTIONS = {
     "Storage": ["object-storage", "block-storage", "network-storage", "additional-disks", "snapshot", "os-disks"],
     "Images": ["images", "marketplace-images", "project-images"],
     "Managed Services": ["managed-services", "database", "docker", "load-balancer", "waf", "vps", "alert-manager"],
+    "Management": ["management", "users", "secret-manager", "groups", "organizations", "policies", "projects"],
 }
 
 # category -> its services, in listing order
@@ -28,6 +29,7 @@ CATEGORIES = {
     "block-storage": ["network-storage", "additional-disks", "snapshot", "os-disks"],
     "images": ["marketplace-images", "project-images"],
     "managed-services": ["database", "docker", "load-balancer", "waf", "vps", "alert-manager"],
+    "management": ["users", "secret-manager", "groups", "organizations", "policies", "projects"],
 }
 
 # the new, still empty services (ct and object-storage already have commands)
@@ -123,11 +125,12 @@ def test_documented_example_commands():
 
 
 def test_requested_service_names_are_all_present():
-    # ICE; Network (7); Block storage (4); Images (2); Managed services (6)
+    # ICE; Network (7); Block storage (4); Images (2); Managed services (6); Management (6)
     wanted = {"ice", "network", "vpc", "shared-vpc", "ipam", "router", "security-group", "reserved-ip",
               "cloud-dns", "block-storage", "network-storage", "additional-disks", "snapshot", "os-disks",
               "images", "marketplace-images", "project-images", "managed-services", "database", "docker",
-              "load-balancer", "waf", "vps", "alert-manager"}
+              "load-balancer", "waf", "vps", "alert-manager",
+              "management", "users", "secret-manager", "groups", "organizations", "policies", "projects"}
     assert wanted <= set(cli.commands)
 
 

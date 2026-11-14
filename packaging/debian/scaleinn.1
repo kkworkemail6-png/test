@@ -10,12 +10,12 @@ scaleinn \- command-line interface for the Scaleinn cloud platform
 .SH DESCRIPTION
 .B scaleinn
 is a lightweight client for the Scaleinn backend APIs. It authenticates a root
-or IAM user, remembers the selected project, and manages cloud resources through
+or IAM user, remembers the selected organisation and project, and manages cloud resources through
 the backend. It never contacts infrastructure services directly.
 .SH COMMANDS
 .TP
 .B configure
-Sign in and select the active project. Options:
+Sign in, select the organisation and the active project, and store the user's policies. Options:
 \fB\-\-protocol\fR, \fB\-\-api\-url\fR, \fB\-\-object\-storage\-url\fR,
 \fB\-\-verify\-ssl\fR/\fB\-\-no\-verify\-ssl\fR,
 \fB\-\-ca\-bundle\fR, \fB\-\-project\-only\fR, \fB\-\-with\-token\fR.
@@ -49,6 +49,10 @@ Images category: marketplace\-images *, project\-images *. Each is also a top\-l
 .B managed\-services
 Managed services category: database *, docker *, load\-balancer *, waf *, vps *, alert\-manager *.
 Each is also a top\-level command.
+.TP
+.B management
+Management category: users *, secret\-manager *, groups *, organizations *, policies *, projects *.
+Each is also a top\-level command.
 .SH OPTIONS
 .TP
 .B \-\-debug
@@ -59,10 +63,10 @@ Show the version and exit.
 .SH FILES
 .TP
 .I ~/.scaleinn/config.json
-API URL, selected project and other non-secret settings.
+API URL and other non-secret settings.
 .TP
 .I ~/.scaleinn/credentials.json
-Access and refresh tokens (mode 600). Passwords are never stored.
+Access and refresh tokens, the selected organisation and project, and the user's policies (mode 600). A new login replaces all of it. Passwords are never stored.
 .TP
 .I ~/.scaleinn/logs/scaleinn.log
 Log file.

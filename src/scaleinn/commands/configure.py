@@ -1,11 +1,29 @@
-"""``scaleinn configure``: log in and select the active project."""
+"""``scaleinn configure``: log in, select the organisation and project, load the policies.
+
+Everything that belongs to the login is stored in ``~/.scaleinn/credentials.json``
+next to the token: the selected organisation and project, and the user's policies.
+Running ``configure`` again (re-login) replaces all of it; ``--project-only`` keeps
+the login and the organisation and re-selects the project and its policies.
+"""
 
 from __future__ import annotations
 
 import click
 
-from scaleinn.core import authentication, config as cfg, env, project_manager
-from scaleinn.core.exceptions import AuthenticationError, ResponseFormatError, ValidationError
+from scaleinn.core import (
+    authentication,
+    config as cfg,
+    env,
+    organisation_manager,
+    policy_manager,
+    project_manager,
+)
+from scaleinn.core.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    ResponseFormatError,
+    ValidationError,
+)
 from scaleinn.core.logger import get_logger
 from scaleinn.core.session import Session, pass_session
 from scaleinn.utils import terminal
@@ -35,7 +53,46 @@ def _apply_connection_options(
         terminal.info("Connection settings saved.")
 
 
-@click.command("configure", help="Sign in to Scaleinn and select the active project.")
+def _select_organisation(session: Session) -> organisation_manager.Organisation | None:
+    """Pick the organisation. Problems that do not block the login only produce a warning."""
+    terminal.info("\nFetching accessible organisations...\n")
+    try:
+        organisations = organisation_manager.fetch_organisations(session.client)
+    except ResponseFormatError as exc:
+        terminal.warn(f"{exc.message} Enter the organisation manually, or leave it empty to skip.")
+        organisation = organisation_manager.prompt_organisation_manually()
+    except AuthorizationError as exc:
+        terminal.warn(f"{exc.message} Continuing without an organisation.")
+        organisation = None
+    else:
+        if organisations:
+            organisation = organisation_manager.choose_organisation(organisations)
+        else:
+            terminal.warn("No organisations were returned for this user. Continuing without one.")
+            organisation = None
+    organisation_manager.save_selected_organisation(organisation)
+    return organisation
+
+
+def _select_project(session: Session) -> project_manager.Project:
+    terminal.info("\nFetching accessible projects...\n")
+    try:
+        projects = project_manager.fetch_projects(session.client)
+    except ResponseFormatError as exc:
+        terminal.warn(f"{exc.message} Enter the project details manually.")
+        project = project_manager.prompt_project_manually()
+    else:
+        if not projects:
+            raise ValidationError(
+                "No accessible projects were returned for this user.",
+                hint="Ask your Scaleinn administrator for access to a project.",
+            )
+        project = project_manager.choose_project(projects)
+    project_manager.save_selected_project(project)
+    return project
+
+
+@click.command("configure", help="Sign in to Scaleinn, select the organisation and project, and load your policies.")
 @click.option(
     "--protocol",
     type=click.Choice(list(env.ENVIRONMENTS)),
@@ -50,7 +107,11 @@ def _apply_connection_options(
     type=click.Path(exists=True, dir_okay=False, resolve_path=True),
     help="Path to a custom CA certificate bundle.",
 )
-@click.option("--project-only", is_flag=True, help="Only change the selected project, using the current login.")
+@click.option(
+    "--project-only",
+    is_flag=True,
+    help="Keep the current login and organisation; only select another project (and reload its policies).",
+)
 @click.option(
     "--with-token",
     is_flag=True,
@@ -72,11 +133,14 @@ def configure(
     for message in cfg.connection_warnings(session.config):
         terminal.warn_once(message)  # shown before any password is typed; not repeated later
 
+    organisation = None
     if project_only:
         if not session.token_manager.has_credentials:
             raise AuthenticationError(
                 "You are not logged in.", hint="Run 'scaleinn configure' without --project-only."
             )
+        stored = session.organisation
+        organisation = organisation_manager.Organisation(stored["id"], stored["name"]) if stored else None
     else:
         auth_type = authentication.prompt_auth_type()
         terminal.info("")
@@ -87,27 +151,26 @@ def configure(
             identifier, password = authentication.prompt_credentials(auth_type)
             terminal.info("\nAuthenticating with Scaleinn...")
             authentication.authenticate(session, auth_type, identifier, password)
+        # a new login starts from a clean slate: organisation, project and policies are re-selected
         cfg.update_config(auth_type=auth_type)
         session.reload()
         terminal.success("\nAuthentication successful!")
+        organisation = _select_organisation(session)
 
-    terminal.info("\nFetching accessible projects...\n")
-    try:
-        projects = project_manager.fetch_projects(session.client)
-    except ResponseFormatError as exc:
-        terminal.warn(f"{exc.message} Enter the project details manually.")
-        project = project_manager.prompt_project_manually()
-    else:
-        if not projects:
-            raise ValidationError(
-                "No accessible projects were returned for this user.",
-                hint="Ask your Scaleinn administrator for access to a project.",
-            )
-        project = project_manager.choose_project(projects)
-
-    project_manager.save_selected_project(project)
-    session.reload()
+    project = _select_project(session)
     terminal.success("\nProject selected successfully!")
+
+    terminal.info("\nLoading your policies...")
+    loaded, reason = policy_manager.refresh_policies(session.client, project.id)
+    if loaded:
+        terminal.info("Policies loaded.")
+    else:
+        terminal.warn(f"Could not load your policies: {reason} They were not saved.")
+
+    session.reload()
+    if organisation:
+        terminal.info(f"\nSelected organisation: {organisation.name}")
+        terminal.info(f"Organisation ID: {organisation.id}")
     terminal.info(f"Selected project: {project.name}")
     terminal.info(f"Project ID: {project.id}")
     terminal.info("\nScaleinn CLI configuration completed.")

@@ -7,6 +7,7 @@ from scaleinn.core import config as cfg
 from scaleinn.core import project_manager as pm
 from scaleinn.core.exceptions import (
     APIError,
+    NotConfiguredError,
     ResponseFormatError,
     ProjectNotSelectedError,
 )
@@ -55,17 +56,41 @@ def test_choose_project_rejects_out_of_range():
     assert "not in the range" in result.output
 
 
-def test_save_selected_project_changes_only_project_fields():
+def test_save_selected_project_is_stored_in_credentials_not_config(logged_in):
     cfg.update_config(auth_type="iam", default_output="json")
     pm.save_selected_project(PROJECTS[1])
-    stored = json.loads(cfg.config_path().read_text())
-    assert (stored["project_id"], stored["project_name"]) == ("dev00000aa", "Development")
-    assert stored["auth_type"] == "iam" and stored["default_output"] == "json"
+    stored = json.loads(cfg.credentials_path().read_text())
+    assert stored["project"] == {"id": "dev00000aa", "name": "Development"}
+    assert stored["access_token"]  # the token is untouched
+    config = json.loads(cfg.config_path().read_text())
+    assert "project_id" not in config and "project_name" not in config
+    assert config["auth_type"] == "iam" and config["default_output"] == "json"
 
 
-def test_get_selected_project_id():
+def test_save_selected_project_requires_login():
+    with pytest.raises(NotConfiguredError):
+        pm.save_selected_project(PROJECTS[0])
+
+
+def test_selecting_a_project_removes_legacy_config_keys(logged_in):
+    cfg.update_config(project_id="legacy", project_name="Legacy")
+    pm.save_selected_project(PROJECTS[0])
+    config = json.loads(cfg.config_path().read_text())
+    assert "project_id" not in config and "project_name" not in config
+
+
+def test_get_selected_project_id(logged_in):
+    assert pm.get_selected_project_id(cfg.load_config()) == "proj1234ab"
+    pm.save_selected_project(PROJECTS[2])
+    assert pm.get_selected_project_id(cfg.load_config()) == "tst11111bb"
+
+
+def test_get_selected_project_id_without_selection_raises():
     with pytest.raises(ProjectNotSelectedError):
         pm.get_selected_project_id(cfg.load_config())
+
+
+def test_legacy_config_project_is_still_read_as_a_fallback():
     cfg.update_config(project_id="abc")
     assert pm.get_selected_project_id(cfg.load_config()) == "abc"
 

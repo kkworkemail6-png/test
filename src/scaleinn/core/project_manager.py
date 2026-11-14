@@ -1,8 +1,9 @@
 """Centralized project selection.
 
 Resource modules never read or write the selected project themselves; they call
-``session.project_id`` which delegates here. The stored project ID is only a
-convenience: the backend validates project access on every request.
+``session.project_id`` which delegates here. The selection is stored in
+``credentials.json`` together with the token it belongs to. The stored project ID is
+only a convenience: the backend validates project access on every request.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import click
 
 from scaleinn.auth import operations as auth_operations
 from scaleinn.core import config as cfg
+from scaleinn.core import credentials
 from scaleinn.core.api_client import ApiClient
 from scaleinn.core.exceptions import ProjectNotSelectedError, ResponseFormatError
 from scaleinn.core.logger import get_logger
@@ -100,13 +102,16 @@ def prompt_project_manually() -> Project:
 
 
 def save_selected_project(project: Project) -> None:
-    """Persist the selection, changing only the two project fields."""
-    cfg.update_config(project_id=project.id, project_name=project.name)
+    """Store the selection in ``credentials.json`` next to the token (other keys untouched)."""
+    credentials.update_context(project=credentials.selection(project.id, project.name))
+    cfg.remove_keys("project_id", "project_name")  # legacy location, now superseded
     log.info("Project selected: %s", project.id)
 
 
 def get_selected_project_id(config: dict[str, Any]) -> str:
-    project_id = config.get("project_id")
+    """The selected project ID: from ``credentials.json``, else the legacy ``config.json`` value."""
+    project = credentials.get_project()
+    project_id = (project or {}).get("id") or config.get("project_id")
     if not project_id:
         raise ProjectNotSelectedError(
             "No project selected.", hint="Run 'scaleinn configure' to choose a project."
